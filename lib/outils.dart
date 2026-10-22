@@ -7,8 +7,10 @@ const Color kOcreFonce = Color(0xFF9A6F00); // jaune foncé, pour le nom de l'ap
 const Color kFond = Color(0xFFF1F7F3);
 
 // Transforme 1250000 en "1 250 000".
+// Gère aussi les montants négatifs : -100000 devient "-100 000".
 String formaterMontant(int nombre) {
-  final texte = nombre.toString();
+  final negatif = nombre < 0;
+  final texte = nombre.abs().toString();
   final resultat = StringBuffer();
   for (int i = 0; i < texte.length; i++) {
     if (i > 0 && (texte.length - i) % 3 == 0) {
@@ -16,7 +18,7 @@ String formaterMontant(int nombre) {
     }
     resultat.write(texte[i]);
   }
-  return resultat.toString();
+  return negatif ? '-$resultat' : resultat.toString();
 }
 
 // Dit si deux dates tombent le même jour.

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'depense.dart';
+import 'depenses_page.dart';
 import 'outils.dart';
 import 'profil.dart';
 import 'vente.dart';
@@ -7,6 +9,7 @@ import 'ventes_page.dart';
 
 class AccueilPage extends StatelessWidget {
   final List<Vente> ventes;
+  final List<Depense> depenses;
   final Profil profil;
   final VoidCallback onNouvelleVente;
   final VoidCallback onOuvrirMoi;
@@ -14,6 +17,7 @@ class AccueilPage extends StatelessWidget {
   const AccueilPage({
     super.key,
     required this.ventes,
+    required this.depenses,
     required this.profil,
     required this.onNouvelleVente,
     required this.onOuvrirMoi,
@@ -30,6 +34,15 @@ class AccueilPage extends StatelessWidget {
         totalJour += vente.montant;
       }
     }
+
+    // Dépenses d'aujourd'hui, et ce qui reste : ventes moins dépenses.
+    int depensesJour = 0;
+    for (final depense in depenses) {
+      if (memeJour(depense.date, maintenant)) {
+        depensesJour += depense.montant;
+      }
+    }
+    final solde = totalJour - depensesJour;
 
     // Les 7 derniers jours (le plus ancien en premier, aujourd'hui en dernier)
     // et le total des ventes de chacun.
@@ -150,6 +163,30 @@ class AccueilPage extends StatelessWidget {
           ],
         ),
 
+        // ----- Dépenses et solde du jour -----
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: _CarteChiffre(
+                  titre: 'Dépenses du jour',
+                  montant: depensesJour,
+                  couleur: kRouge,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _CarteChiffre(
+                  titre: 'Solde du jour',
+                  montant: solde,
+                  couleur: solde >= 0 ? kPrincipal : kRouge,
+                ),
+              ),
+            ],
+          ),
+        ),
+
         // ----- Carte "Cette semaine" -----
         Container(
           margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
@@ -233,6 +270,44 @@ class AccueilPage extends StatelessWidget {
           for (final vente in recentes) VenteTile(vente: vente),
         const SizedBox(height: 16),
       ],
+    );
+  }
+}
+
+// Une petite carte avec un titre et un montant.
+class _CarteChiffre extends StatelessWidget {
+  final String titre;
+  final int montant;
+  final Color couleur;
+
+  const _CarteChiffre({
+    required this.titre,
+    required this.montant,
+    required this.couleur,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: const [
+          BoxShadow(color: Color(0x1A0F5132), blurRadius: 10, offset: Offset(0, 2)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(titre, style: const TextStyle(fontSize: 11, color: Color(0xFF5B6B63))),
+          const SizedBox(height: 2),
+          Text(
+            '${formaterMontant(montant)} F',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: couleur),
+          ),
+        ],
+      ),
     );
   }
 }

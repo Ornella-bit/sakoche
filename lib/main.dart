@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'accueil_page.dart';
 import 'base_de_donnees.dart';
+import 'depense.dart';
+import 'depenses_page.dart';
 import 'menu_lateral.dart';
 import 'moi_page.dart';
 import 'nouvelle_vente_page.dart';
@@ -51,12 +53,14 @@ class Coque extends StatefulWidget {
 class _CoqueState extends State<Coque> {
   int _onglet = 0;
   List<Vente> _ventes = [];
+  List<Depense> _depenses = [];
   Profil _profil = const Profil();
 
   @override
   void initState() {
     super.initState();
     _chargerVentes();
+    _chargerDepenses();
     _chargerProfil();
   }
 
@@ -66,6 +70,20 @@ class _CoqueState extends State<Coque> {
     setState(() {
       _ventes = ventes;
     });
+  }
+
+  Future<void> _chargerDepenses() async {
+    final depenses = await BaseDeDonnees.lireDepenses();
+    if (!mounted) return;
+    setState(() {
+      _depenses = depenses;
+    });
+  }
+
+  // Après "Effacer toutes mes données" : on recharge tout.
+  Future<void> _rechargerTout() async {
+    await _chargerVentes();
+    await _chargerDepenses();
   }
 
   Future<void> _chargerProfil() async {
@@ -97,23 +115,20 @@ class _CoqueState extends State<Coque> {
     final pages = <Widget>[
       AccueilPage(
         ventes: _ventes,
+        depenses: _depenses,
         profil: _profil,
         onNouvelleVente: _nouvelleVente,
         onOuvrirMoi: () => _aller(4),
       ),
       VentesPage(ventes: _ventes, onNouvelleVente: _nouvelleVente),
-      const BientotPage(
-        titre: 'Dépenses',
-        icone: Icons.receipt_long_outlined,
-        message: 'Bientôt : note ce que tu dépenses pour ton commerce.',
-      ),
+      DepensesPage(depenses: _depenses, onChange: _chargerDepenses),
       const BientotPage(
         titre: 'Clients',
         icone: Icons.groups_outlined,
         message: 'Bientôt : suis les dettes de tes clients et leurs remboursements.',
       ),
       MoiPage(
-        onDonneesEffacees: _chargerVentes,
+        onDonneesEffacees: _rechargerTout,
         onProfilModifie: _chargerProfil,
       ),
     ];
@@ -133,7 +148,7 @@ class _CoqueState extends State<Coque> {
         profil: _profil,
         ongletActuel: _onglet,
         onAller: _aller,
-        onDonneesEffacees: _chargerVentes,
+        onDonneesEffacees: _rechargerTout,
       ),
       body: IndexedStack(index: _onglet, children: pages),
       // On empêche la taille du texte du téléphone d'agrandir la barre du bas.

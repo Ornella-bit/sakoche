@@ -2,6 +2,7 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'article.dart';
+import 'depense.dart';
 import 'vente.dart';
 
 class BaseDeDonnees {
@@ -17,11 +18,12 @@ class BaseDeDonnees {
 
     _base = await openDatabase(
       chemin,
-      version: 3, // version 3 : on ajoute le catalogue d'articles
+      version: 4, // version 4 : on ajoute les dépenses
       onCreate: (db, version) async {
         await _creerTableVentes(db);
         await _creerTableLignes(db);
         await _creerTableArticles(db);
+        await _creerTableDepenses(db);
       },
       onUpgrade: (db, ancienneVersion, nouvelleVersion) async {
         if (ancienneVersion < 2) {
@@ -36,6 +38,9 @@ class BaseDeDonnees {
             SELECT article, prix_unitaire FROM lignes_vente
             WHERE id IN (SELECT MAX(id) FROM lignes_vente GROUP BY article)
           ''');
+        }
+        if (ancienneVersion < 4) {
+          await _creerTableDepenses(db);
         }
       },
     );
@@ -60,6 +65,18 @@ class BaseDeDonnees {
         article TEXT NOT NULL,
         quantite INTEGER NOT NULL,
         prix_unitaire INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  static Future<void> _creerTableDepenses(Database db) async {
+    await db.execute('''
+      CREATE TABLE depenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        libelle TEXT NOT NULL,
+        montant INTEGER NOT NULL,
+        categorie TEXT NOT NULL,
+        date TEXT NOT NULL
       )
     ''');
   }
@@ -134,13 +151,47 @@ class BaseDeDonnees {
     return resultat;
   }
 
-  // Supprime toutes les ventes (et leurs articles vendus). Le catalogue reste.
+  // Supprime toutes les ventes et toutes les dépenses. Le catalogue reste.
   static Future<void> toutEffacer() async {
     final db = await _ouvrir();
     await db.transaction((txn) async {
       await txn.delete('lignes_vente');
       await txn.delete('ventes');
+      await txn.delete('depenses');
     });
+  }
+
+  // ---------- Dépenses ----------
+
+  static Future<void> ajouterDepense(Depense depense) async {
+    final db = await _ouvrir();
+    await db.insert('depenses', {
+      'libelle': depense.libelle,
+      'montant': depense.montant,
+      'categorie': depense.categorie,
+      'date': depense.date.toIso8601String(),
+    });
+  }
+
+  static Future<List<Depense>> lireDepenses() async {
+    final db = await _ouvrir();
+    final lignes = await db.query('depenses', orderBy: 'date DESC');
+    return lignes
+        .map(
+          (l) => Depense(
+            id: l['id'] as int,
+            libelle: l['libelle'] as String,
+            montant: l['montant'] as int,
+            categorie: l['categorie'] as String,
+            date: DateTime.parse(l['date'] as String),
+          ),
+        )
+        .toList();
+  }
+
+  static Future<void> supprimerDepense(int id) async {
+    final db = await _ouvrir();
+    await db.delete('depenses', where: 'id = ?', whereArgs: [id]);
   }
 
   // ---------- Catalogue d'articles ----------

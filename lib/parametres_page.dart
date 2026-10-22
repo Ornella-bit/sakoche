@@ -16,7 +16,7 @@ class ParametresPage extends StatelessWidget {
         return AlertDialog(
           title: const Text('Effacer toutes les données ?'),
           content: const Text(
-            'Toutes tes ventes seront supprimées. Cette action est définitive.',
+            'Toutes tes ventes et tes dépenses seront supprimées. Cette action est définitive.',
           ),
           actions: [
             TextButton(
@@ -65,7 +65,7 @@ class ParametresPage extends StatelessWidget {
               'Effacer toutes mes données',
               style: TextStyle(color: Colors.red),
             ),
-            subtitle: const Text('Supprime toutes les ventes enregistrées'),
+            subtitle: const Text('Supprime toutes les ventes et dépenses enregistrées'),
             onTap: () => _effacer(context),
           ),
         ],
