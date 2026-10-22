@@ -1,25 +1,37 @@
-// Une vente = un montant + le moment où elle a été faite.
+// Une ligne de vente = un article vendu : "3 × sachet d’eau à 100 FCFA".
+class LigneVente {
+  final String article;
+  final int quantite;
+  final int prixUnitaire;
+
+  LigneVente({
+    required this.article,
+    required this.quantite,
+    required this.prixUnitaire,
+  });
+
+  int get montant => quantite * prixUnitaire;
+}
+
+// Une vente = une date + plusieurs articles + le total.
 class Vente {
-  final int? id; // numéro donné automatiquement par la base de données
-  final int montant;
+  final int? id;
   final DateTime date;
+  final List<LigneVente> lignes;
+  final int montant; // le total de la vente
 
-  Vente({this.id, required this.montant, required this.date});
+  Vente({
+    this.id,
+    required this.date,
+    required this.lignes,
+    required this.montant,
+  });
 
-  // Transforme une vente en "ligne" de tableau pour la ranger dans la base.
-  Map<String, Object?> toMap() {
-    return {
-      'montant': montant,
-      'date': date.toIso8601String(), // la date devient un texte, ex : 2026-10-21T14:05:00
-    };
-  }
-
-  // Fait l'inverse : reconstruit une vente à partir d'une ligne de la base.
-  factory Vente.fromMap(Map<String, Object?> ligne) {
-    return Vente(
-      id: ligne['id'] as int,
-      montant: ligne['montant'] as int,
-      date: DateTime.parse(ligne['date'] as String),
-    );
+  // Résumé en une ligne, ex : "2 × riz, 1 × huile".
+  String get resume {
+    if (lignes.isEmpty) {
+      return 'Vente sans détail';
+    }
+    return lignes.map((l) => '${l.quantite} × ${l.article}').join(', ');
   }
 }

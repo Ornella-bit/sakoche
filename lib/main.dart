@@ -1,21 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
+import 'accueil_page.dart';
 import 'base_de_donnees.dart';
+import 'moi_page.dart';
+import 'nouvelle_vente_page.dart';
+import 'outils.dart';
 import 'vente.dart';
+import 'ventes_page.dart';
 
-// Les couleurs de Sakoche : bleu indigo (comme les pagnes teintés)
-// et ocre (comme l'or des cauris).
-const Color kIndigo = Color(0xFF1F3A5F);
-const Color kOcre = Color(0xFFE0A526);
-const Color kFond = Color(0xFFF3F6F9);
-
-// Point de départ de toute application Flutter.
 void main() {
   runApp(const SakocheApp());
 }
 
-// L'application elle-même : son nom, son thème (couleurs) et sa première page.
 class SakocheApp extends StatelessWidget {
   const SakocheApp({super.key});
 
@@ -27,59 +23,29 @@ class SakocheApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: kIndigo),
         scaffoldBackgroundColor: kFond,
+        navigationBarTheme: const NavigationBarThemeData(
+          indicatorColor: Color(0x59E0A526),
+        ),
         useMaterial3: true,
       ),
-      home: const AccueilPage(),
+      home: const Coque(),
     );
   }
 }
 
-// Transforme 1250000 en "1 250 000" pour que les grands nombres restent lisibles.
-String formaterMontant(int nombre) {
-  final texte = nombre.toString();
-  final resultat = StringBuffer();
-  for (int i = 0; i < texte.length; i++) {
-    if (i > 0 && (texte.length - i) % 3 == 0) {
-      resultat.write(' ');
-    }
-    resultat.write(texte[i]);
-  }
-  return resultat.toString();
-}
-
-// Transforme une date en "14:05".
-String formaterHeure(DateTime date) {
-  final heures = date.hour.toString().padLeft(2, '0');
-  final minutes = date.minute.toString().padLeft(2, '0');
-  return '$heures:$minutes';
-}
-
-// La page d'accueil. "Stateful" = son contenu change (la liste des ventes grandit).
-class AccueilPage extends StatefulWidget {
-  const AccueilPage({super.key});
+// La "coque" : l'écran qui contient la barre d'onglets en bas
+// et qui affiche la page de l'onglet choisi.
+class Coque extends StatefulWidget {
+  const Coque({super.key});
 
   @override
-  State<AccueilPage> createState() => _AccueilPageState();
+  State<Coque> createState() => _CoqueState();
 }
 
-class _AccueilPageState extends State<AccueilPage> {
-  // Récupère ce que l'utilisatrice tape dans le champ de saisie.
-  final TextEditingController _montantController = TextEditingController();
+class _CoqueState extends State<Coque> {
+  int _onglet = 0;
+  List<Vente> _ventes = [];
 
-  // La liste des ventes affichées à l'écran.
-  final List<Vente> _ventes = [];
-
-  // Le total est recalculé à chaque fois en additionnant toutes les ventes.
-  int get _total {
-    int somme = 0;
-    for (final vente in _ventes) {
-      somme += vente.montant;
-    }
-    return somme;
-  }
-
-  // initState s'exécute une seule fois, quand la page apparaît.
-  // C'est le bon endroit pour récupérer les ventes déjà enregistrées.
   @override
   void initState() {
     super.initState();
@@ -88,135 +54,111 @@ class _AccueilPageState extends State<AccueilPage> {
 
   Future<void> _chargerVentes() async {
     final ventes = await BaseDeDonnees.lireVentes();
-    if (!mounted) return; // si la page a disparu entre-temps, on ne fait rien
-    setState(() {
-      _ventes.addAll(ventes);
-    });
-  }
-
-  Future<void> _ajouterVente() async {
-    final montant = int.tryParse(_montantController.text.trim());
-
-    // Si le champ est vide ou le montant invalide, on prévient et on s'arrête.
-    if (montant == null || montant <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Entre un montant valide, par exemple 2500')),
-      );
-      return;
-    }
-
-    final vente = Vente(montant: montant, date: DateTime.now());
-
-    // 1) On enregistre d'abord dans la base du téléphone...
-    await BaseDeDonnees.ajouterVente(vente);
     if (!mounted) return;
-
-    // 2) ...puis on met à jour l'écran.
     setState(() {
-      _ventes.insert(0, vente);
+      _ventes = ventes;
     });
-    _montantController.clear();
   }
 
-  @override
-  void dispose() {
-    _montantController.dispose();
-    super.dispose();
+  // Ouvre la page "Nouvelle vente" et, au retour, recharge la liste.
+  Future<void> _nouvelleVente() async {
+    final enregistree = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const NouvelleVentePage()),
+    );
+    if (enregistree == true) {
+      await _chargerVentes();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final pages = <Widget>[
+      AccueilPage(ventes: _ventes, onNouvelleVente: _nouvelleVente),
+      VentesPage(ventes: _ventes, onNouvelleVente: _nouvelleVente),
+      const BientotPage(
+        titre: 'Dépenses',
+        icone: Icons.receipt_long_outlined,
+        message: 'Bientôt : note ce que tu dépenses pour ton commerce.',
+      ),
+      const BientotPage(
+        titre: 'Clients',
+        icone: Icons.groups_outlined,
+        message: 'Bientôt : suis les dettes de tes clients et leurs remboursements.',
+      ),
+      const MoiPage(),
+    ];
+
     return Scaffold(
-      body: Column(
-        children: [
-          // Bandeau du haut : le total des ventes, bien visible.
-          Container(
-            width: double.infinity,
-            color: kIndigo,
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-            child: SafeArea(
-              bottom: false,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Sakoche',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Total des ventes',
-                    style: TextStyle(color: Colors.white, fontSize: 15),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${formaterMontant(_total)} FCFA',
-                    style: const TextStyle(
-                      color: kOcre,
-                      fontSize: 36,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+      body: IndexedStack(index: _onglet, children: pages),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _onglet,
+        onDestinationSelected: (index) {
+          setState(() {
+            _onglet = index;
+          });
+        },
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'Accueil',
           ),
-
-          // Zone de saisie : le montant et le bouton.
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: _montantController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                    labelText: 'Montant de la vente (FCFA)',
-                    border: OutlineInputBorder(),
-                  ),
-                  onSubmitted: (_) => _ajouterVente(),
-                ),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: _ajouterVente,
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                  ),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Ajouter la vente'),
-                ),
-              ],
-            ),
+          NavigationDestination(
+            icon: Icon(Icons.point_of_sale_outlined),
+            selectedIcon: Icon(Icons.point_of_sale),
+            label: 'Ventes',
           ),
-
-          // La liste des ventes, la plus récente en premier.
-          Expanded(
-            child: _ventes.isEmpty
-                ? const Center(
-                    child: Text('Aucune vente pour le moment. Ajoute la première !'),
-                  )
-                : ListView.builder(
-                    itemCount: _ventes.length,
-                    itemBuilder: (context, index) {
-                      final vente = _ventes[index];
-                      return ListTile(
-                        leading: const Icon(Icons.payments_outlined, color: kIndigo),
-                        title: Text(
-                          '${formaterMontant(vente.montant)} FCFA',
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        subtitle: Text('Vente à ${formaterHeure(vente.date)}'),
-                      );
-                    },
-                  ),
+          NavigationDestination(
+            icon: Icon(Icons.receipt_long_outlined),
+            selectedIcon: Icon(Icons.receipt_long),
+            label: 'Dépenses',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.groups_outlined),
+            selectedIcon: Icon(Icons.groups),
+            label: 'Clients',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person),
+            label: 'Moi',
           ),
         ],
+      ),
+    );
+  }
+}
+
+// Page provisoire pour les onglets pas encore construits.
+class BientotPage extends StatelessWidget {
+  final String titre;
+  final IconData icone;
+  final String message;
+
+  const BientotPage({
+    super.key,
+    required this.titre,
+    required this.icone,
+    required this.message,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(titre)),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icone, size: 56, color: kIndigo),
+              const SizedBox(height: 16),
+              Text(message, textAlign: TextAlign.center),
+            ],
+          ),
+        ),
       ),
     );
   }
