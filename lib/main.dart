@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import 'accueil_page.dart';
 import 'base_de_donnees.dart';
+import 'menu_lateral.dart';
 import 'moi_page.dart';
 import 'nouvelle_vente_page.dart';
 import 'outils.dart';
+import 'profil.dart';
 import 'vente.dart';
 import 'ventes_page.dart';
 
@@ -25,6 +27,10 @@ class SakocheApp extends StatelessWidget {
         scaffoldBackgroundColor: kFond,
         navigationBarTheme: const NavigationBarThemeData(
           indicatorColor: Color(0x59F7B500),
+          // Taille de police FIXE pour les noms des onglets.
+          labelTextStyle: WidgetStatePropertyAll(
+            TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+          ),
         ),
         useMaterial3: true,
       ),
@@ -33,8 +39,8 @@ class SakocheApp extends StatelessWidget {
   }
 }
 
-// La "coque" : l'écran qui contient la barre d'onglets en bas
-// et qui affiche la page de l'onglet choisi.
+// La "coque" : le menu latéral, la barre d'onglets en bas
+// et la page de l'onglet choisi.
 class Coque extends StatefulWidget {
   const Coque({super.key});
 
@@ -45,11 +51,13 @@ class Coque extends StatefulWidget {
 class _CoqueState extends State<Coque> {
   int _onglet = 0;
   List<Vente> _ventes = [];
+  Profil _profil = const Profil();
 
   @override
   void initState() {
     super.initState();
     _chargerVentes();
+    _chargerProfil();
   }
 
   Future<void> _chargerVentes() async {
@@ -60,7 +68,20 @@ class _CoqueState extends State<Coque> {
     });
   }
 
-  // Ouvre la page "Nouvelle vente" et, au retour, recharge la liste.
+  Future<void> _chargerProfil() async {
+    final profil = await Profil.charger();
+    if (!mounted) return;
+    setState(() {
+      _profil = profil;
+    });
+  }
+
+  void _aller(int index) {
+    setState(() {
+      _onglet = index;
+    });
+  }
+
   Future<void> _nouvelleVente() async {
     final enregistree = await Navigator.push<bool>(
       context,
@@ -74,7 +95,12 @@ class _CoqueState extends State<Coque> {
   @override
   Widget build(BuildContext context) {
     final pages = <Widget>[
-      AccueilPage(ventes: _ventes, onNouvelleVente: _nouvelleVente),
+      AccueilPage(
+        ventes: _ventes,
+        profil: _profil,
+        onNouvelleVente: _nouvelleVente,
+        onOuvrirMoi: () => _aller(4),
+      ),
       VentesPage(ventes: _ventes, onNouvelleVente: _nouvelleVente),
       const BientotPage(
         titre: 'Dépenses',
@@ -86,45 +112,55 @@ class _CoqueState extends State<Coque> {
         icone: Icons.groups_outlined,
         message: 'Bientôt : suis les dettes de tes clients et leurs remboursements.',
       ),
-            MoiPage(onDonneesEffacees: _chargerVentes),
+      MoiPage(
+        onDonneesEffacees: _chargerVentes,
+        onProfilModifie: _chargerProfil,
+      ),
     ];
 
     return Scaffold(
+      drawer: MenuLateral(
+        profil: _profil,
+        ongletActuel: _onglet,
+        onAller: _aller,
+        onDonneesEffacees: _chargerVentes,
+      ),
       body: IndexedStack(index: _onglet, children: pages),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _onglet,
-        onDestinationSelected: (index) {
-          setState(() {
-            _onglet = index;
-          });
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
-            label: 'Accueil',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.point_of_sale_outlined),
-            selectedIcon: Icon(Icons.point_of_sale),
-            label: 'Ventes',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.receipt_long_outlined),
-            selectedIcon: Icon(Icons.receipt_long),
-            label: 'Dépenses',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.groups_outlined),
-            selectedIcon: Icon(Icons.groups),
-            label: 'Clients',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'Moi',
-          ),
-        ],
+      // On empêche la taille du texte du téléphone d'agrandir la barre du bas.
+      bottomNavigationBar: MediaQuery.withClampedTextScaling(
+        minScaleFactor: 1.0,
+        maxScaleFactor: 1.0,
+        child: NavigationBar(
+          selectedIndex: _onglet,
+          onDestinationSelected: _aller,
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.home_outlined),
+              selectedIcon: Icon(Icons.home),
+              label: 'Accueil',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.point_of_sale_outlined),
+              selectedIcon: Icon(Icons.point_of_sale),
+              label: 'Ventes',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.receipt_long_outlined),
+              selectedIcon: Icon(Icons.receipt_long),
+              label: 'Dépenses',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.groups_outlined),
+              selectedIcon: Icon(Icons.groups),
+              label: 'Clients',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.person_outline),
+              selectedIcon: Icon(Icons.person),
+              label: 'Moi',
+            ),
+          ],
+        ),
       ),
     );
   }

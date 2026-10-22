@@ -7,8 +7,13 @@ import 'profil_page.dart';
 
 class MoiPage extends StatefulWidget {
   final Future<void> Function() onDonneesEffacees;
+  final Future<void> Function() onProfilModifie; // prévient la page principale
 
-  const MoiPage({super.key, required this.onDonneesEffacees});
+  const MoiPage({
+    super.key,
+    required this.onDonneesEffacees,
+    required this.onProfilModifie,
+  });
 
   @override
   State<MoiPage> createState() => _MoiPageState();
@@ -38,6 +43,7 @@ class _MoiPageState extends State<MoiPage> {
     );
     if (modifie == true) {
       await _chargerProfil();
+      await widget.onProfilModifie();
     }
   }
 
@@ -104,7 +110,7 @@ class _MoiPageState extends State<MoiPage> {
             onTap: () => showAboutDialog(
               context: context,
               applicationName: 'Sakoche',
-              applicationVersion: '0.6.0',
+              applicationVersion: '0.8.0',
               applicationLegalese: 'Le carnet de caisse du petit commerçant.',
             ),
           ),
