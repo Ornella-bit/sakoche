@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'articles_page.dart';
 import 'outils.dart';
 import 'parametres_page.dart';
 import 'profil.dart';
@@ -52,6 +53,12 @@ class MenuLateral extends StatelessWidget {
     messager.showSnackBar(
       const SnackBar(content: Text('Bientôt disponible')),
     );
+  }
+
+  void _articles(BuildContext context) {
+    final navigateur = Navigator.of(context);
+    navigateur.pop(); // ferme le menu
+    navigateur.push(MaterialPageRoute(builder: (_) => const ArticlesPage()));
   }
 
   void _parametres(BuildContext context) {
@@ -138,7 +145,7 @@ class MenuLateral extends StatelessWidget {
                 _tuile(
                   icone: Icons.inventory_2_outlined,
                   texte: 'Mes articles',
-                  onTap: () => _bientot(context),
+                  onTap: () => _articles(context),
                 ),
                 _tuile(
                   icone: Icons.bar_chart,

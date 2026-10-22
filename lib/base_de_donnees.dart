@@ -1,6 +1,7 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
+import 'article.dart';
 import 'vente.dart';
 
 class BaseDeDonnees {
@@ -16,17 +17,25 @@ class BaseDeDonnees {
 
     _base = await openDatabase(
       chemin,
-      version: 2, // on passe de 1 à 2 : on ajoute le détail des articles
-      // Installation toute neuve : on crée les deux tableaux.
+      version: 3, // version 3 : on ajoute le catalogue d'articles
       onCreate: (db, version) async {
         await _creerTableVentes(db);
         await _creerTableLignes(db);
+        await _creerTableArticles(db);
       },
-      // Téléphone qui avait déjà la version 1 : on ajoute seulement ce qui manque,
-      // sans toucher aux ventes déjà enregistrées.
       onUpgrade: (db, ancienneVersion, nouvelleVersion) async {
         if (ancienneVersion < 2) {
           await _creerTableLignes(db);
+        }
+        if (ancienneVersion < 3) {
+          await _creerTableArticles(db);
+          // On remplit le catalogue avec les articles déjà vendus,
+          // avec le dernier prix utilisé pour chacun.
+          await db.execute('''
+            INSERT OR REPLACE INTO articles (nom, prix)
+            SELECT article, prix_unitaire FROM lignes_vente
+            WHERE id IN (SELECT MAX(id) FROM lignes_vente GROUP BY article)
+          ''');
         }
       },
     );
@@ -55,7 +64,21 @@ class BaseDeDonnees {
     ''');
   }
 
-  // Enregistre la vente ET ses articles, ensemble ou pas du tout.
+  // UNIQUE + NOCASE : "Riz" et "riz" sont le même article (un seul exemplaire).
+  static Future<void> _creerTableArticles(Database db) async {
+    await db.execute('''
+      CREATE TABLE articles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nom TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        prix INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  // ---------- Ventes ----------
+
+  // Enregistre la vente ET ses articles. Chaque article vendu est aussi
+  // mémorisé dans le catalogue (avec son prix), donc le catalogue se remplit tout seul.
   static Future<void> ajouterVente(Vente vente) async {
     final db = await _ouvrir();
     await db.transaction((txn) async {
@@ -70,11 +93,15 @@ class BaseDeDonnees {
           'quantite': ligne.quantite,
           'prix_unitaire': ligne.prixUnitaire,
         });
+        await txn.insert(
+          'articles',
+          {'nom': ligne.article, 'prix': ligne.prixUnitaire},
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
       }
     });
   }
 
-  // Lit toutes les ventes (la plus récente d’abord), avec leurs articles.
   static Future<List<Vente>> lireVentes() async {
     final db = await _ouvrir();
     final lignesVentes = await db.query('ventes', orderBy: 'date DESC');
@@ -106,12 +133,51 @@ class BaseDeDonnees {
     }
     return resultat;
   }
-    // Supprime toutes les ventes (et leurs articles).
+
+  // Supprime toutes les ventes (et leurs articles vendus). Le catalogue reste.
   static Future<void> toutEffacer() async {
     final db = await _ouvrir();
     await db.transaction((txn) async {
       await txn.delete('lignes_vente');
       await txn.delete('ventes');
     });
+  }
+
+  // ---------- Catalogue d'articles ----------
+
+  static Future<List<Article>> lireArticles() async {
+    final db = await _ouvrir();
+    final lignes = await db.query('articles', orderBy: 'nom COLLATE NOCASE');
+    return lignes
+        .map(
+          (l) => Article(
+            id: l['id'] as int,
+            nom: l['nom'] as String,
+            prix: l['prix'] as int,
+          ),
+        )
+        .toList();
+  }
+
+  // Ajoute un article, ou le modifie s'il a déjà un id.
+  static Future<void> enregistrerArticle(Article article) async {
+    final db = await _ouvrir();
+    final valeurs = {'nom': article.nom, 'prix': article.prix};
+    if (article.id == null) {
+      await db.insert('articles', valeurs, conflictAlgorithm: ConflictAlgorithm.replace);
+    } else {
+      await db.update(
+        'articles',
+        valeurs,
+        where: 'id = ?',
+        whereArgs: [article.id],
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+  }
+
+  static Future<void> supprimerArticle(int id) async {
+    final db = await _ouvrir();
+    await db.delete('articles', where: 'id = ?', whereArgs: [id]);
   }
 }

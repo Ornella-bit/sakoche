@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'article.dart';
 import 'base_de_donnees.dart';
 import 'outils.dart';
 import 'vente.dart';
@@ -20,6 +21,52 @@ class _NouvelleVentePageState extends State<NouvelleVentePage> {
 
   // Les articles ajoutés à la vente en cours (pas encore enregistrée).
   final List<LigneVente> _lignes = [];
+
+  // Le catalogue : les articles déjà connus (nom + prix habituel).
+  List<Article> _articles = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _chargerArticles();
+  }
+
+  Future<void> _chargerArticles() async {
+    final articles = await BaseDeDonnees.lireArticles();
+    if (!mounted) return;
+    setState(() {
+      _articles = articles;
+    });
+  }
+
+  // Ajoute une ligne. Si le même article au même prix est déjà dans la vente,
+  // on augmente simplement sa quantité.
+  void _ajouterOuFusionner(LigneVente nouvelle) {
+    final index = _lignes.indexWhere(
+      (l) =>
+          l.article.toLowerCase() == nouvelle.article.toLowerCase() &&
+          l.prixUnitaire == nouvelle.prixUnitaire,
+    );
+    if (index >= 0) {
+      final ancienne = _lignes[index];
+      _lignes[index] = LigneVente(
+        article: ancienne.article,
+        quantite: ancienne.quantite + nouvelle.quantite,
+        prixUnitaire: ancienne.prixUnitaire,
+      );
+    } else {
+      _lignes.add(nouvelle);
+    }
+  }
+
+  // Un clic sur un article du catalogue l'ajoute directement (quantité 1).
+  void _ajouterRapide(Article article) {
+    setState(() {
+      _ajouterOuFusionner(
+        LigneVente(article: article.nom, quantite: 1, prixUnitaire: article.prix),
+      );
+    });
+  }
 
   int get _total {
     int somme = 0;
@@ -52,7 +99,7 @@ class _NouvelleVentePageState extends State<NouvelleVentePage> {
     }
 
     setState(() {
-      _lignes.add(
+      _ajouterOuFusionner(
         LigneVente(article: article, quantite: quantite, prixUnitaire: prix),
       );
     });
@@ -98,6 +145,36 @@ class _NouvelleVentePageState extends State<NouvelleVentePage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // Le catalogue : des boutons pour ajouter un article d'un seul clic.
+          if (_articles.isNotEmpty) ...[
+            const Text(
+              'Articles rapides',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Touche un article pour l’ajouter. Touche-le encore pour augmenter la quantité.',
+              style: TextStyle(fontSize: 12, color: Color(0xFF5B6B63)),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final a in _articles)
+                  ActionChip(
+                    label: Text('${a.nom} · ${formaterMontant(a.prix)}'),
+                    onPressed: () => _ajouterRapide(a),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Autre article',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+          ],
           TextField(
             controller: _articleController,
             focusNode: _articleFocus,

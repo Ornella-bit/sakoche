@@ -118,7 +118,17 @@ class _CoqueState extends State<Coque> {
       ),
     ];
 
-    return Scaffold(
+    // PopScope décide ce que fait le bouton "retour" du téléphone :
+    // - sur l'accueil (onglet 0) : on laisse l'application se fermer ;
+    // - sur un autre onglet : on revient à l'accueil.
+    return PopScope(
+      canPop: _onglet == 0,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          _aller(0);
+        }
+      },
+      child: Scaffold(
       drawer: MenuLateral(
         profil: _profil,
         ongletActuel: _onglet,
@@ -161,6 +171,7 @@ class _CoqueState extends State<Coque> {
             ),
           ],
         ),
+      ),
       ),
     );
   }
