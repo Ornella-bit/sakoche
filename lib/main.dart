@@ -21,10 +21,10 @@ class SakocheApp extends StatelessWidget {
       title: 'Sakoche',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: kIndigo),
+        colorScheme: ColorScheme.fromSeed(seedColor: kPrincipal),
         scaffoldBackgroundColor: kFond,
         navigationBarTheme: const NavigationBarThemeData(
-          indicatorColor: Color(0x59E0A526),
+          indicatorColor: Color(0x59F7B500),
         ),
         useMaterial3: true,
       ),
@@ -86,7 +86,7 @@ class _CoqueState extends State<Coque> {
         icone: Icons.groups_outlined,
         message: 'Bientôt : suis les dettes de tes clients et leurs remboursements.',
       ),
-      const MoiPage(),
+            MoiPage(onDonneesEffacees: _chargerVentes),
     ];
 
     return Scaffold(
@@ -153,7 +153,7 @@ class BientotPage extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icone, size: 56, color: kIndigo),
+              Icon(icone, size: 56, color: kPrincipal),
               const SizedBox(height: 16),
               Text(message, textAlign: TextAlign.center),
             ],

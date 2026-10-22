@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
 // Les couleurs de Sakoche (à changer quand le logo sera choisi).
-const Color kIndigo = Color(0xFF1F3A5F);
-const Color kOcre = Color(0xFFE0A526);
-const Color kFond = Color(0xFFF3F6F9);
+const Color kPrincipal = Color(0xFF0F5132);
+const Color kAccent = Color(0xFFF7B500);
+const Color kFond = Color(0xFFF1F7F3);
 
 // Transforme 1250000 en "1 250 000".
 String formaterMontant(int nombre) {

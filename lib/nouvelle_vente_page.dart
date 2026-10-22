@@ -196,7 +196,7 @@ class _NouvelleVentePageState extends State<NouvelleVentePage> {
                     style: const TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: kIndigo,
+                      color: kPrincipal,
                     ),
                   ),
                 ],

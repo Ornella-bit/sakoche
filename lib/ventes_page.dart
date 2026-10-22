@@ -42,7 +42,7 @@ class VenteTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: const Icon(Icons.shopping_bag_outlined, color: kIndigo),
+      leading: const Icon(Icons.shopping_bag_outlined, color: kPrincipal),
       title: Text(
         '${formaterMontant(vente.montant)} FCFA',
         style: const TextStyle(fontWeight: FontWeight.w600),

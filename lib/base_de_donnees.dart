@@ -106,4 +106,12 @@ class BaseDeDonnees {
     }
     return resultat;
   }
+    // Supprime toutes les ventes (et leurs articles).
+  static Future<void> toutEffacer() async {
+    final db = await _ouvrir();
+    await db.transaction((txn) async {
+      await txn.delete('lignes_vente');
+      await txn.delete('ventes');
+    });
+  }
 }

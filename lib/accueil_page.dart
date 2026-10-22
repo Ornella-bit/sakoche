@@ -30,7 +30,7 @@ class AccueilPage extends StatelessWidget {
       children: [
         Container(
           width: double.infinity,
-          color: kIndigo,
+          color: kPrincipal,
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
           child: SafeArea(
             bottom: false,
@@ -54,7 +54,7 @@ class AccueilPage extends StatelessWidget {
                 Text(
                   '${formaterMontant(total)} FCFA',
                   style: const TextStyle(
-                    color: kOcre,
+                    color: kAccent,
                     fontSize: 36,
                     fontWeight: FontWeight.bold,
                   ),
