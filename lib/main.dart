@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'base_de_donnees.dart';
+import 'vente.dart';
+
 // Les couleurs de Sakoche : bleu indigo (comme les pagnes teintés)
 // et ocre (comme l'or des cauris).
-const Color kIndigo = Color.fromARGB(209, 95, 147, 27);
+const Color kIndigo = Color(0xFF1F3A5F);
 const Color kOcre = Color(0xFFE0A526);
-const Color kFond = Color.fromARGB(255, 181, 188, 214);
+const Color kFond = Color(0xFFF3F6F9);
 
 // Point de départ de toute application Flutter.
 void main() {
@@ -29,14 +32,6 @@ class SakocheApp extends StatelessWidget {
       home: const AccueilPage(),
     );
   }
-}
-
-// Une vente = un montant + le moment où elle a été faite.
-class Vente {
-  final int montant;
-  final DateTime date;
-
-  Vente(this.montant, this.date);
 }
 
 // Transforme 1250000 en "1 250 000" pour que les grands nombres restent lisibles.
@@ -71,7 +66,7 @@ class _AccueilPageState extends State<AccueilPage> {
   // Récupère ce que l'utilisatrice tape dans le champ de saisie.
   final TextEditingController _montantController = TextEditingController();
 
-  // La liste des ventes (pour l'instant, gardée seulement en mémoire).
+  // La liste des ventes affichées à l'écran.
   final List<Vente> _ventes = [];
 
   // Le total est recalculé à chaque fois en additionnant toutes les ventes.
@@ -83,7 +78,23 @@ class _AccueilPageState extends State<AccueilPage> {
     return somme;
   }
 
-  void _ajouterVente() {
+  // initState s'exécute une seule fois, quand la page apparaît.
+  // C'est le bon endroit pour récupérer les ventes déjà enregistrées.
+  @override
+  void initState() {
+    super.initState();
+    _chargerVentes();
+  }
+
+  Future<void> _chargerVentes() async {
+    final ventes = await BaseDeDonnees.lireVentes();
+    if (!mounted) return; // si la page a disparu entre-temps, on ne fait rien
+    setState(() {
+      _ventes.addAll(ventes);
+    });
+  }
+
+  Future<void> _ajouterVente() async {
     final montant = int.tryParse(_montantController.text.trim());
 
     // Si le champ est vide ou le montant invalide, on prévient et on s'arrête.
@@ -94,9 +105,15 @@ class _AccueilPageState extends State<AccueilPage> {
       return;
     }
 
-    // setState dit à Flutter : "les données ont changé, redessine l'écran".
+    final vente = Vente(montant: montant, date: DateTime.now());
+
+    // 1) On enregistre d'abord dans la base du téléphone...
+    await BaseDeDonnees.ajouterVente(vente);
+    if (!mounted) return;
+
+    // 2) ...puis on met à jour l'écran.
     setState(() {
-      _ventes.insert(0, Vente(montant, DateTime.now()));
+      _ventes.insert(0, vente);
     });
     _montantController.clear();
   }
