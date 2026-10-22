@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 
 import 'article.dart';
 import 'base_de_donnees.dart';
+import 'client.dart';
+import 'clients_page.dart';
 import 'outils.dart';
 import 'vente.dart';
 
@@ -17,6 +19,7 @@ class _NouvelleVentePageState extends State<NouvelleVentePage> {
   final TextEditingController _articleController = TextEditingController();
   final TextEditingController _quantiteController = TextEditingController(text: '1');
   final TextEditingController _prixController = TextEditingController();
+  final TextEditingController _payeController = TextEditingController(text: '0');
   final FocusNode _articleFocus = FocusNode();
 
   // Les articles ajoutés à la vente en cours (pas encore enregistrée).
@@ -25,10 +28,66 @@ class _NouvelleVentePageState extends State<NouvelleVentePage> {
   // Le catalogue : les articles déjà connus (nom + prix habituel).
   List<Article> _articles = [];
 
+  // La vente à crédit : le client choisi et ce qu'il paie tout de suite.
+  List<Client> _clients = [];
+  bool _credit = false;
+  Client? _clientChoisi;
+
   @override
   void initState() {
     super.initState();
     _chargerArticles();
+    _chargerClients();
+  }
+
+  Future<void> _chargerClients() async {
+    final clients = await BaseDeDonnees.lireClients();
+    if (!mounted) return;
+    setState(() {
+      _clients = clients;
+    });
+  }
+
+  // Une feuille qui propose la liste des clients, avec "Nouveau client" en premier.
+  Future<void> _choisirClient() async {
+    final choix = await showModalBottomSheet<Client>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.person_add_alt),
+                title: const Text('Nouveau client'),
+                onTap: () async {
+                  final nouveau = await demanderNouveauClient(sheetContext);
+                  if (nouveau != null && sheetContext.mounted) {
+                    Navigator.pop(sheetContext, nouveau);
+                  }
+                },
+              ),
+              for (final client in _clients)
+                ListTile(
+                  leading: const Icon(Icons.person_outline),
+                  title: Text(client.nom),
+                  subtitle: client.dette > 0
+                      ? Text('Doit déjà ${formaterMontant(client.dette)} FCFA')
+                      : null,
+                  onTap: () => Navigator.pop(sheetContext, client),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+    if (choix == null) return;
+    await _chargerClients();
+    if (!mounted) return;
+    setState(() {
+      _clientChoisi = choix;
+    });
   }
 
   Future<void> _chargerArticles() async {
@@ -117,10 +176,30 @@ class _NouvelleVentePageState extends State<NouvelleVentePage> {
       return;
     }
 
+    // Si la vente est à crédit : ce qui n'est pas payé tout de suite
+    // devient une dette du client.
+    int credit = 0;
+    int? clientId;
+    if (_credit) {
+      if (_clientChoisi == null) {
+        _message('Choisis le client qui prend à crédit');
+        return;
+      }
+      final paye = int.tryParse(_payeController.text.trim()) ?? 0;
+      if (paye > _total) {
+        _message('Le montant payé dépasse le total de la vente');
+        return;
+      }
+      credit = _total - paye;
+      clientId = _clientChoisi!.id;
+    }
+
     final vente = Vente(
       date: DateTime.now(),
       lignes: List.of(_lignes),
       montant: _total,
+      clientId: clientId,
+      credit: credit,
     );
     await BaseDeDonnees.ajouterVente(vente);
     if (!mounted) return;
@@ -134,6 +213,7 @@ class _NouvelleVentePageState extends State<NouvelleVentePage> {
     _articleController.dispose();
     _quantiteController.dispose();
     _prixController.dispose();
+    _payeController.dispose();
     _articleFocus.dispose();
     super.dispose();
   }
@@ -255,6 +335,43 @@ class _NouvelleVentePageState extends State<NouvelleVentePage> {
                 ],
               ),
             ),
+          const Divider(height: 32),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Vente à crédit'),
+            subtitle: const Text('Le client paie plus tard (tout ou une partie)'),
+            value: _credit,
+            onChanged: (valeur) {
+              setState(() {
+                _credit = valeur;
+              });
+            },
+          ),
+          if (_credit) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _choisirClient,
+              style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+              icon: const Icon(Icons.person_outline),
+              label: Text(_clientChoisi?.nom ?? 'Choisir un client'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _payeController,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Montant payé tout de suite (FCFA)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Reste à payer : ${formaterMontant(_total - (int.tryParse(_payeController.text.trim()) ?? 0))} FCFA',
+              style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFB3261E)),
+            ),
+          ],
         ],
       ),
       // Barre du bas : le total et le bouton pour enregistrer.

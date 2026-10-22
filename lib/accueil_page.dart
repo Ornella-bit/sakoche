@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'client.dart';
 import 'depense.dart';
 import 'depenses_page.dart';
 import 'outils.dart';
@@ -10,6 +11,7 @@ import 'ventes_page.dart';
 class AccueilPage extends StatelessWidget {
   final List<Vente> ventes;
   final List<Depense> depenses;
+  final List<OperationClient> operations;
   final Profil profil;
   final VoidCallback onNouvelleVente;
   final VoidCallback onOuvrirMoi;
@@ -18,6 +20,7 @@ class AccueilPage extends StatelessWidget {
     super.key,
     required this.ventes,
     required this.depenses,
+    required this.operations,
     required this.profil,
     required this.onNouvelleVente,
     required this.onOuvrirMoi,
@@ -42,7 +45,26 @@ class AccueilPage extends StatelessWidget {
         depensesJour += depense.montant;
       }
     }
-    final solde = totalJour - depensesJour;
+
+    // Les dettes : ce qui est resté à payer aujourd'hui, ce qui a été remboursé
+    // aujourd'hui, et le total que les clients doivent encore.
+    int creditsJour = 0;
+    int remboursementsJour = 0;
+    int dettesTotal = 0;
+    for (final operation in operations) {
+      dettesTotal += operation.estCredit ? operation.montant : -operation.montant;
+      if (memeJour(operation.date, maintenant)) {
+        if (operation.estCredit) {
+          creditsJour += operation.montant;
+        } else {
+          remboursementsJour += operation.montant;
+        }
+      }
+    }
+
+    // Solde = l'argent réellement reçu aujourd'hui moins les dépenses :
+    // les ventes à crédit ne comptent pas tant qu'elles ne sont pas payées.
+    final solde = totalJour - creditsJour + remboursementsJour - depensesJour;
 
     // Les 7 derniers jours (le plus ancien en premier, aujourd'hui en dernier)
     // et le total des ventes de chacun.
@@ -166,24 +188,35 @@ class AccueilPage extends StatelessWidget {
         // ----- Dépenses et solde du jour -----
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-          child: Row(
-            children: [
-              Expanded(
-                child: _CarteChiffre(
-                  titre: 'Dépenses du jour',
-                  montant: depensesJour,
-                  couleur: kRouge,
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: _CarteChiffre(
+                    titre: 'Dépenses du jour',
+                    montant: depensesJour,
+                    couleur: kRouge,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _CarteChiffre(
-                  titre: 'Solde du jour',
-                  montant: solde,
-                  couleur: solde >= 0 ? kPrincipal : kRouge,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _CarteChiffre(
+                    titre: 'Solde du jour',
+                    montant: solde,
+                    couleur: solde >= 0 ? kPrincipal : kRouge,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _CarteChiffre(
+                    titre: 'Dettes clients',
+                    montant: dettesTotal,
+                    couleur: kOcreFonce,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
 
@@ -289,7 +322,7 @@ class _CarteChiffre extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -302,9 +335,14 @@ class _CarteChiffre extends StatelessWidget {
         children: [
           Text(titre, style: const TextStyle(fontSize: 11, color: Color(0xFF5B6B63))),
           const SizedBox(height: 2),
-          Text(
-            '${formaterMontant(montant)} F',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: couleur),
+          // FittedBox réduit un peu le texte s'il est trop large pour la carte.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '${formaterMontant(montant)} F',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: couleur),
+            ),
           ),
         ],
       ),

@@ -19,12 +19,16 @@ class Vente {
   final DateTime date;
   final List<LigneVente> lignes;
   final int montant; // le total de la vente
+  final int? clientId; // le client, si la vente est (en partie) à crédit
+  final int credit; // la part qui reste à payer (0 si tout est payé)
 
   Vente({
     this.id,
     required this.date,
     required this.lignes,
     required this.montant,
+    this.clientId,
+    this.credit = 0,
   });
 
   // Résumé en une ligne, ex : "2 × riz, 1 × huile".

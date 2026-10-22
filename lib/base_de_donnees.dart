@@ -2,6 +2,7 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'article.dart';
+import 'client.dart';
 import 'depense.dart';
 import 'vente.dart';
 
@@ -18,12 +19,13 @@ class BaseDeDonnees {
 
     _base = await openDatabase(
       chemin,
-      version: 4, // version 4 : on ajoute les dépenses
+      version: 5, // version 5 : on ajoute les clients et les dettes
       onCreate: (db, version) async {
         await _creerTableVentes(db);
         await _creerTableLignes(db);
         await _creerTableArticles(db);
         await _creerTableDepenses(db);
+        await _creerTablesClients(db);
       },
       onUpgrade: (db, ancienneVersion, nouvelleVersion) async {
         if (ancienneVersion < 2) {
@@ -41,6 +43,9 @@ class BaseDeDonnees {
         }
         if (ancienneVersion < 4) {
           await _creerTableDepenses(db);
+        }
+        if (ancienneVersion < 5) {
+          await _creerTablesClients(db);
         }
       },
     );
@@ -65,6 +70,26 @@ class BaseDeDonnees {
         article TEXT NOT NULL,
         quantite INTEGER NOT NULL,
         prix_unitaire INTEGER NOT NULL
+      )
+    ''');
+  }
+
+  // Deux tableaux : les clients, et leur "compte" (dettes et remboursements).
+  static Future<void> _creerTablesClients(Database db) async {
+    await db.execute('''
+      CREATE TABLE clients (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nom TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        telephone TEXT NOT NULL DEFAULT ''
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE operations_client (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        montant INTEGER NOT NULL,
+        date TEXT NOT NULL
       )
     ''');
   }
@@ -116,6 +141,15 @@ class BaseDeDonnees {
           conflictAlgorithm: ConflictAlgorithm.replace,
         );
       }
+      // Vente à crédit : on note ce que le client doit sur son compte.
+      if (vente.clientId != null && vente.credit > 0) {
+        await txn.insert('operations_client', {
+          'client_id': vente.clientId,
+          'type': typeCredit,
+          'montant': vente.credit,
+          'date': vente.date.toIso8601String(),
+        });
+      }
     });
   }
 
@@ -151,14 +185,103 @@ class BaseDeDonnees {
     return resultat;
   }
 
-  // Supprime toutes les ventes et toutes les dépenses. Le catalogue reste.
+  // Supprime les ventes, les dépenses et les dettes. Le catalogue et la liste des clients restent.
   static Future<void> toutEffacer() async {
     final db = await _ouvrir();
     await db.transaction((txn) async {
       await txn.delete('lignes_vente');
       await txn.delete('ventes');
       await txn.delete('depenses');
+      await txn.delete('operations_client');
     });
+  }
+
+  // ---------- Clients et dettes ----------
+
+  // Lit les clients avec ce que chacun doit : la somme de ses dettes
+  // moins la somme de ses remboursements (calculée par la base elle-même).
+  static Future<List<Client>> lireClients() async {
+    final db = await _ouvrir();
+    final lignes = await db.rawQuery('''
+      SELECT c.id, c.nom, c.telephone,
+        COALESCE(SUM(CASE WHEN o.type = 'credit' THEN o.montant
+                          WHEN o.type = 'remboursement' THEN -o.montant END), 0) AS dette
+      FROM clients c
+      LEFT JOIN operations_client o ON o.client_id = c.id
+      GROUP BY c.id
+      ORDER BY c.nom COLLATE NOCASE
+    ''');
+    return lignes
+        .map(
+          (l) => Client(
+            id: l['id'] as int,
+            nom: l['nom'] as String,
+            telephone: l['telephone'] as String,
+            dette: (l['dette'] as num).toInt(),
+          ),
+        )
+        .toList();
+  }
+
+  // Ajoute un client et renvoie son numéro. Si un client du même nom existe déjà,
+  // on renvoie simplement le numéro de celui-ci.
+  static Future<int> ajouterClient(String nom, String telephone) async {
+    final db = await _ouvrir();
+    final existant = await db.query('clients', where: 'nom = ?', whereArgs: [nom]);
+    if (existant.isNotEmpty) {
+      return existant.first['id'] as int;
+    }
+    return db.insert('clients', {'nom': nom, 'telephone': telephone});
+  }
+
+  static Future<void> supprimerClient(int id) async {
+    final db = await _ouvrir();
+    await db.transaction((txn) async {
+      await txn.delete('operations_client', where: 'client_id = ?', whereArgs: [id]);
+      await txn.delete('clients', where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
+  static Future<void> ajouterOperation(OperationClient operation) async {
+    final db = await _ouvrir();
+    await db.insert('operations_client', {
+      'client_id': operation.clientId,
+      'type': operation.type,
+      'montant': operation.montant,
+      'date': operation.date.toIso8601String(),
+    });
+  }
+
+  static List<OperationClient> _versOperations(List<Map<String, Object?>> lignes) {
+    return lignes
+        .map(
+          (l) => OperationClient(
+            id: l['id'] as int,
+            clientId: l['client_id'] as int,
+            type: l['type'] as String,
+            montant: l['montant'] as int,
+            date: DateTime.parse(l['date'] as String),
+          ),
+        )
+        .toList();
+  }
+
+  // L'historique d'un seul client.
+  static Future<List<OperationClient>> lireOperations(int clientId) async {
+    final db = await _ouvrir();
+    final lignes = await db.query(
+      'operations_client',
+      where: 'client_id = ?',
+      whereArgs: [clientId],
+      orderBy: 'date DESC',
+    );
+    return _versOperations(lignes);
+  }
+
+  // Toutes les opérations (pour les chiffres de l'accueil).
+  static Future<List<OperationClient>> lireToutesOperations() async {
+    final db = await _ouvrir();
+    return _versOperations(await db.query('operations_client'));
   }
 
   // ---------- Dépenses ----------

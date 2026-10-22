@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'accueil_page.dart';
 import 'base_de_donnees.dart';
+import 'client.dart';
+import 'clients_page.dart';
 import 'depense.dart';
 import 'depenses_page.dart';
 import 'menu_lateral.dart';
@@ -54,6 +56,8 @@ class _CoqueState extends State<Coque> {
   int _onglet = 0;
   List<Vente> _ventes = [];
   List<Depense> _depenses = [];
+  List<Client> _clients = [];
+  List<OperationClient> _operations = [];
   Profil _profil = const Profil();
 
   @override
@@ -61,6 +65,7 @@ class _CoqueState extends State<Coque> {
     super.initState();
     _chargerVentes();
     _chargerDepenses();
+    _chargerClients();
     _chargerProfil();
   }
 
@@ -80,10 +85,22 @@ class _CoqueState extends State<Coque> {
     });
   }
 
+  // Les clients (avec leurs dettes) et toutes les opérations de dettes.
+  Future<void> _chargerClients() async {
+    final clients = await BaseDeDonnees.lireClients();
+    final operations = await BaseDeDonnees.lireToutesOperations();
+    if (!mounted) return;
+    setState(() {
+      _clients = clients;
+      _operations = operations;
+    });
+  }
+
   // Après "Effacer toutes mes données" : on recharge tout.
   Future<void> _rechargerTout() async {
     await _chargerVentes();
     await _chargerDepenses();
+    await _chargerClients();
   }
 
   Future<void> _chargerProfil() async {
@@ -107,6 +124,7 @@ class _CoqueState extends State<Coque> {
     );
     if (enregistree == true) {
       await _chargerVentes();
+      await _chargerClients(); // une vente à crédit change les dettes
     }
   }
 
@@ -116,17 +134,14 @@ class _CoqueState extends State<Coque> {
       AccueilPage(
         ventes: _ventes,
         depenses: _depenses,
+        operations: _operations,
         profil: _profil,
         onNouvelleVente: _nouvelleVente,
         onOuvrirMoi: () => _aller(4),
       ),
       VentesPage(ventes: _ventes, onNouvelleVente: _nouvelleVente),
       DepensesPage(depenses: _depenses, onChange: _chargerDepenses),
-      const BientotPage(
-        titre: 'Clients',
-        icone: Icons.groups_outlined,
-        message: 'Bientôt : suis les dettes de tes clients et leurs remboursements.',
-      ),
+      ClientsPage(clients: _clients, onChange: _chargerClients),
       MoiPage(
         onDonneesEffacees: _rechargerTout,
         onProfilModifie: _chargerProfil,
