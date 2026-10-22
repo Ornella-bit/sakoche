@@ -3,9 +3,9 @@ import 'package:flutter/services.dart';
 
 // Les couleurs de Sakoche : bleu indigo (comme les pagnes teintés)
 // et ocre (comme l'or des cauris).
-const Color kIndigo = Color(0xFF1F3A5F);
+const Color kIndigo = Color.fromARGB(209, 95, 147, 27);
 const Color kOcre = Color(0xFFE0A526);
-const Color kFond = Color(0xFFF3F6F9);
+const Color kFond = Color.fromARGB(255, 181, 188, 214);
 
 // Point de départ de toute application Flutter.
 void main() {
