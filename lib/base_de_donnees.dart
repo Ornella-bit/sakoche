@@ -181,8 +181,8 @@ class BaseDeDonnees {
 
   // ---------- Ventes ----------
 
-  // Enregistre la vente ET ses articles. Chaque article vendu est aussi
-  // mémorisé dans le catalogue (avec son prix), donc le catalogue se remplit tout seul.
+  // Enregistre la vente et, s'il y en a, le détail de ses articles.
+  // Le détail est facultatif : une vente peut n'avoir qu'un montant.
   static Future<void> ajouterVente(Vente vente) async {
     final db = await _ouvrir();
     await db.transaction((txn) async {
@@ -197,18 +197,13 @@ class BaseDeDonnees {
           'quantite': ligne.quantite,
           'prix_unitaire': ligne.prixUnitaire,
         });
-        await txn.insert(
-          'articles',
-          {'nom': ligne.article, 'prix': ligne.prixUnitaire},
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
       }
       // Vente à crédit : ce qui n'est pas payé devient une dette du client.
       // Le motif reprend la liste des articles vendus.
       if (vente.clientId != null && vente.credit > 0) {
         await txn.insert('dettes', {
           'client_id': vente.clientId,
-          'motif': vente.resume,
+          'motif': vente.lignes.isEmpty ? '' : vente.resume,
           'montant': vente.credit,
           'date': vente.date.toIso8601String(),
           'vente_id': idVente,

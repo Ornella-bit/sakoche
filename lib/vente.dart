@@ -34,7 +34,7 @@ class Vente {
   // Résumé en une ligne, ex : "2 × riz, 1 × huile".
   String get resume {
     if (lignes.isEmpty) {
-      return 'Vente sans détail';
+      return 'Vente'; // vente rapide, sans détail d'articles
     }
     return lignes.map((l) => '${l.quantite} × ${l.article}').join(', ');
   }
