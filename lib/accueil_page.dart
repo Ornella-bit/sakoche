@@ -6,12 +6,13 @@ import 'depenses_page.dart';
 import 'outils.dart';
 import 'profil.dart';
 import 'vente.dart';
-import 'ventes_page.dart';
 
+// L'accueil est une page FIXE : elle ne défile pas.
+// Le graphique de la semaine prend toute la place qui reste.
 class AccueilPage extends StatelessWidget {
   final List<Vente> ventes;
   final List<Depense> depenses;
-  final List<OperationClient> operations;
+  final List<Dette> dettes;
   final Profil profil;
   final VoidCallback onNouvelleVente;
   final VoidCallback onOuvrirMoi;
@@ -20,7 +21,7 @@ class AccueilPage extends StatelessWidget {
     super.key,
     required this.ventes,
     required this.depenses,
-    required this.operations,
+    required this.dettes,
     required this.profil,
     required this.onNouvelleVente,
     required this.onOuvrirMoi,
@@ -30,7 +31,7 @@ class AccueilPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final maintenant = DateTime.now();
 
-    // Total d'aujourd'hui.
+    // Total des ventes d'aujourd'hui.
     int totalJour = 0;
     for (final vente in ventes) {
       if (memeJour(vente.date, maintenant)) {
@@ -38,7 +39,7 @@ class AccueilPage extends StatelessWidget {
       }
     }
 
-    // Dépenses d'aujourd'hui, et ce qui reste : ventes moins dépenses.
+    // Dépenses d'aujourd'hui.
     int depensesJour = 0;
     for (final depense in depenses) {
       if (memeJour(depense.date, maintenant)) {
@@ -46,18 +47,19 @@ class AccueilPage extends StatelessWidget {
       }
     }
 
-    // Les dettes : ce qui est resté à payer aujourd'hui, ce qui a été remboursé
-    // aujourd'hui, et le total que les clients doivent encore.
+    // Les dettes : ce qui est resté à payer sur les ventes d'aujourd'hui,
+    // ce qui a été remboursé aujourd'hui, et ce que les clients doivent encore en tout.
     int creditsJour = 0;
     int remboursementsJour = 0;
     int dettesTotal = 0;
-    for (final operation in operations) {
-      dettesTotal += operation.estCredit ? operation.montant : -operation.montant;
-      if (memeJour(operation.date, maintenant)) {
-        if (operation.estCredit) {
-          creditsJour += operation.montant;
-        } else {
-          remboursementsJour += operation.montant;
+    for (final dette in dettes) {
+      dettesTotal += dette.restant;
+      if (dette.venteId != null && memeJour(dette.date, maintenant)) {
+        creditsJour += dette.montant;
+      }
+      for (final remboursement in dette.remboursements) {
+        if (memeJour(remboursement.date, maintenant)) {
+          remboursementsJour += remboursement.montant;
         }
       }
     }
@@ -92,10 +94,10 @@ class AccueilPage extends StatelessWidget {
     final nomComplet = profil.nom.trim();
     final prenom = nomComplet.isEmpty ? '' : nomComplet.split(' ').first;
     final salutation = prenom.isEmpty ? 'Bonjour' : 'Bonjour, $prenom';
-    final recentes = ventes.take(5).toList();
 
-    return ListView(
-      padding: EdgeInsets.zero,
+    // Une colonne qui s'étire sur toute la largeur et toute la hauteur de l'écran.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // ----- En-tête illustré -----
         Stack(
@@ -220,55 +222,16 @@ class AccueilPage extends StatelessWidget {
           ),
         ),
 
-        // ----- Carte "Cette semaine" -----
-        Container(
-          margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: const [
-              BoxShadow(color: Color(0x1A0F5132), blurRadius: 10, offset: Offset(0, 2)),
-            ],
-          ),
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Cette semaine',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  Text(
-                    '${formaterMontant(totalSemaine)} FCFA',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                      color: kPrincipal,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                height: 100,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    for (int i = 0; i < 7; i++)
-                      Expanded(
-                        child: _Barre(
-                          // Hauteur : 4 (minimum) + une part de 66 selon le plus grand jour.
-                          hauteur: maximum == 0 ? 4 : 4 + 66 * totaux[i] / maximum,
-                          etiquette: initialeJour(jours[i]),
-                          aujourdhui: i == 6,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
+        // ----- Graphique de la semaine : il occupe toute la place restante -----
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: _CarteSemaine(
+              jours: jours,
+              totaux: totaux,
+              maximum: maximum,
+              totalSemaine: totalSemaine,
+            ),
           ),
         ),
 
@@ -285,24 +248,80 @@ class AccueilPage extends StatelessWidget {
             label: const Text('Nouvelle vente'),
           ),
         ),
-
-        // ----- Dernières ventes -----
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16),
-          child: Text(
-            'Dernières ventes',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-          ),
-        ),
-        if (recentes.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: Text('Aucune vente pour le moment.')),
-          )
-        else
-          for (final vente in recentes) VenteTile(vente: vente),
-        const SizedBox(height: 16),
       ],
+    );
+  }
+}
+
+// La carte "Cette semaine". Les barres s'adaptent à la hauteur disponible.
+class _CarteSemaine extends StatelessWidget {
+  final List<DateTime> jours;
+  final List<int> totaux;
+  final int maximum;
+  final int totalSemaine;
+
+  const _CarteSemaine({
+    required this.jours,
+    required this.totaux,
+    required this.maximum,
+    required this.totalSemaine,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: const [
+          BoxShadow(color: Color(0x1A0F5132), blurRadius: 10, offset: Offset(0, 2)),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Cette semaine', style: TextStyle(fontWeight: FontWeight.bold)),
+              Text(
+                '${formaterMontant(totalSemaine)} FCFA',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                  color: kPrincipal,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // LayoutBuilder nous donne la hauteur réellement disponible pour les barres.
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, contraintes) {
+                // On garde 30 de hauteur pour les lettres des jours sous les barres.
+                final hauteurMax =
+                    contraintes.maxHeight > 34 ? contraintes.maxHeight - 30 : 4.0;
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    for (int i = 0; i < 7; i++)
+                      Expanded(
+                        child: _Barre(
+                          hauteur: maximum == 0
+                              ? 4
+                              : 4 + (hauteurMax - 4) * totaux[i] / maximum,
+                          etiquette: initialeJour(jours[i]),
+                          aujourdhui: i == 6,
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -26,6 +26,9 @@ class SakocheApp extends StatelessWidget {
     return MaterialApp(
       title: 'Sakoche',
       debugShowCheckedModeBanner: false,
+      // L'application est en français : calendrier, boutons système, etc.
+      
+      
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: kPrincipal),
         scaffoldBackgroundColor: kFond,
@@ -57,7 +60,7 @@ class _CoqueState extends State<Coque> {
   List<Vente> _ventes = [];
   List<Depense> _depenses = [];
   List<Client> _clients = [];
-  List<OperationClient> _operations = [];
+  List<Dette> _dettes = [];
   Profil _profil = const Profil();
 
   @override
@@ -85,14 +88,14 @@ class _CoqueState extends State<Coque> {
     });
   }
 
-  // Les clients (avec leurs dettes) et toutes les opérations de dettes.
+  // Les clients (avec ce qu'ils doivent) et toutes les dettes.
   Future<void> _chargerClients() async {
     final clients = await BaseDeDonnees.lireClients();
-    final operations = await BaseDeDonnees.lireToutesOperations();
+    final dettes = await BaseDeDonnees.lireDettes();
     if (!mounted) return;
     setState(() {
       _clients = clients;
-      _operations = operations;
+      _dettes = dettes;
     });
   }
 
@@ -134,7 +137,7 @@ class _CoqueState extends State<Coque> {
       AccueilPage(
         ventes: _ventes,
         depenses: _depenses,
-        operations: _operations,
+        dettes: _dettes,
         profil: _profil,
         onNouvelleVente: _nouvelleVente,
         onOuvrirMoi: () => _aller(4),

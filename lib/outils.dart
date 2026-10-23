@@ -57,3 +57,10 @@ String dateDuJour(DateTime date) {
 String initialeJour(DateTime date) {
   return _jours[date.weekday - 1][0].toUpperCase();
 }
+
+// "22/10/2026"
+String formaterDate(DateTime date) {
+  final jour = date.day.toString().padLeft(2, '0');
+  final mois = date.month.toString().padLeft(2, '0');
+  return '$jour/$mois/${date.year}';
+}

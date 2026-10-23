@@ -19,13 +19,14 @@ class BaseDeDonnees {
 
     _base = await openDatabase(
       chemin,
-      version: 5, // version 5 : on ajoute les clients et les dettes
+      version: 6, // version 6 : chaque dette a son motif, sa date et ses remboursements
       onCreate: (db, version) async {
         await _creerTableVentes(db);
         await _creerTableLignes(db);
         await _creerTableArticles(db);
         await _creerTableDepenses(db);
-        await _creerTablesClients(db);
+        await _creerTableClients(db);
+        await _creerTablesDettes(db);
       },
       onUpgrade: (db, ancienneVersion, nouvelleVersion) async {
         if (ancienneVersion < 2) {
@@ -45,7 +46,15 @@ class BaseDeDonnees {
           await _creerTableDepenses(db);
         }
         if (ancienneVersion < 5) {
-          await _creerTablesClients(db);
+          await _creerTableClients(db);
+        }
+        if (ancienneVersion < 6) {
+          await _creerTablesDettes(db);
+          // Les téléphones qui avaient la version 5 ont un ancien tableau
+          // de dettes : on reprend leurs données dans les nouveaux tableaux.
+          if (ancienneVersion == 5) {
+            await _migrerAnciennesDettes(db);
+          }
         }
       },
     );
@@ -74,8 +83,7 @@ class BaseDeDonnees {
     ''');
   }
 
-  // Deux tableaux : les clients, et leur "compte" (dettes et remboursements).
-  static Future<void> _creerTablesClients(Database db) async {
+  static Future<void> _creerTableClients(Database db) async {
     await db.execute('''
       CREATE TABLE clients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,15 +91,69 @@ class BaseDeDonnees {
         telephone TEXT NOT NULL DEFAULT ''
       )
     ''');
+  }
+
+  // Les dettes (chacune avec son motif et sa date) et leurs remboursements.
+  // vente_id est rempli quand la dette vient d'une vente à crédit.
+  static Future<void> _creerTablesDettes(Database db) async {
     await db.execute('''
-      CREATE TABLE operations_client (
+      CREATE TABLE dettes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         client_id INTEGER NOT NULL,
-        type TEXT NOT NULL,
+        motif TEXT NOT NULL DEFAULT '',
+        montant INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        vente_id INTEGER
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE remboursements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        dette_id INTEGER NOT NULL,
         montant INTEGER NOT NULL,
         date TEXT NOT NULL
       )
     ''');
+  }
+
+  // Reprend l'ancien tableau "operations_client" : chaque ancien crédit devient
+  // une dette, et chaque ancien remboursement solde les dettes les plus anciennes d'abord.
+  static Future<void> _migrerAnciennesDettes(Database db) async {
+    final anciennes = await db.query('operations_client', orderBy: 'date ASC');
+    // Pour chaque client : la liste de ses dettes sous la forme [numéro, reste à payer].
+    final dettesParClient = <int, List<List<int>>>{};
+
+    for (final operation in anciennes) {
+      final clientId = operation['client_id'] as int;
+      final montant = operation['montant'] as int;
+      final date = operation['date'] as String;
+      final liste = dettesParClient.putIfAbsent(clientId, () => <List<int>>[]);
+
+      if (operation['type'] == 'credit') {
+        final idDette = await db.insert('dettes', {
+          'client_id': clientId,
+          'motif': '',
+          'montant': montant,
+          'date': date,
+        });
+        liste.add([idDette, montant]);
+      } else {
+        int aPayer = montant;
+        for (final dette in liste) {
+          if (aPayer <= 0) break;
+          if (dette[1] <= 0) continue;
+          final part = dette[1] < aPayer ? dette[1] : aPayer;
+          await db.insert('remboursements', {
+            'dette_id': dette[0],
+            'montant': part,
+            'date': date,
+          });
+          dette[1] -= part;
+          aPayer -= part;
+        }
+      }
+    }
+    await db.execute('DROP TABLE operations_client');
   }
 
   static Future<void> _creerTableDepenses(Database db) async {
@@ -141,13 +203,15 @@ class BaseDeDonnees {
           conflictAlgorithm: ConflictAlgorithm.replace,
         );
       }
-      // Vente à crédit : on note ce que le client doit sur son compte.
+      // Vente à crédit : ce qui n'est pas payé devient une dette du client.
+      // Le motif reprend la liste des articles vendus.
       if (vente.clientId != null && vente.credit > 0) {
-        await txn.insert('operations_client', {
+        await txn.insert('dettes', {
           'client_id': vente.clientId,
-          'type': typeCredit,
+          'motif': vente.resume,
           'montant': vente.credit,
           'date': vente.date.toIso8601String(),
+          'vente_id': idVente,
         });
       }
     });
@@ -192,23 +256,25 @@ class BaseDeDonnees {
       await txn.delete('lignes_vente');
       await txn.delete('ventes');
       await txn.delete('depenses');
-      await txn.delete('operations_client');
+      await txn.delete('remboursements');
+      await txn.delete('dettes');
     });
   }
 
   // ---------- Clients et dettes ----------
 
-  // Lit les clients avec ce que chacun doit : la somme de ses dettes
-  // moins la somme de ses remboursements (calculée par la base elle-même).
+  // Lit les clients avec ce que chacun doit : toutes ses dettes
+  // moins tous ses remboursements (calculé par la base elle-même).
   static Future<List<Client>> lireClients() async {
     final db = await _ouvrir();
     final lignes = await db.rawQuery('''
       SELECT c.id, c.nom, c.telephone,
-        COALESCE(SUM(CASE WHEN o.type = 'credit' THEN o.montant
-                          WHEN o.type = 'remboursement' THEN -o.montant END), 0) AS dette
+        COALESCE((SELECT SUM(d.montant) FROM dettes d WHERE d.client_id = c.id), 0)
+        - COALESCE((SELECT SUM(r.montant)
+                    FROM remboursements r
+                    JOIN dettes d ON d.id = r.dette_id
+                    WHERE d.client_id = c.id), 0) AS dette
       FROM clients c
-      LEFT JOIN operations_client o ON o.client_id = c.id
-      GROUP BY c.id
       ORDER BY c.nom COLLATE NOCASE
     ''');
     return lignes
@@ -237,51 +303,100 @@ class BaseDeDonnees {
   static Future<void> supprimerClient(int id) async {
     final db = await _ouvrir();
     await db.transaction((txn) async {
-      await txn.delete('operations_client', where: 'client_id = ?', whereArgs: [id]);
+      await txn.rawDelete(
+        'DELETE FROM remboursements WHERE dette_id IN (SELECT id FROM dettes WHERE client_id = ?)',
+        [id],
+      );
+      await txn.delete('dettes', where: 'client_id = ?', whereArgs: [id]);
       await txn.delete('clients', where: 'id = ?', whereArgs: [id]);
     });
   }
 
-  static Future<void> ajouterOperation(OperationClient operation) async {
+  // Lit les dettes (celles d'un client, ou toutes si on ne donne pas de client),
+  // chacune avec ses remboursements. La plus récente d'abord.
+  static Future<List<Dette>> lireDettes([int? clientId]) async {
     final db = await _ouvrir();
-    await db.insert('operations_client', {
-      'client_id': operation.clientId,
-      'type': operation.type,
-      'montant': operation.montant,
-      'date': operation.date.toIso8601String(),
-    });
-  }
+    final lignes = clientId == null
+        ? await db.query('dettes', orderBy: 'date DESC')
+        : await db.query(
+            'dettes',
+            where: 'client_id = ?',
+            whereArgs: [clientId],
+            orderBy: 'date DESC',
+          );
+    final lignesRemboursements = await db.query('remboursements', orderBy: 'date ASC');
 
-  static List<OperationClient> _versOperations(List<Map<String, Object?>> lignes) {
+    // On range les remboursements par dette.
+    final parDette = <int, List<Remboursement>>{};
+    for (final r in lignesRemboursements) {
+      final detteId = r['dette_id'] as int;
+      parDette.putIfAbsent(detteId, () => <Remboursement>[]).add(
+            Remboursement(
+              id: r['id'] as int,
+              detteId: detteId,
+              montant: r['montant'] as int,
+              date: DateTime.parse(r['date'] as String),
+            ),
+          );
+    }
+
     return lignes
         .map(
-          (l) => OperationClient(
+          (l) => Dette(
             id: l['id'] as int,
             clientId: l['client_id'] as int,
-            type: l['type'] as String,
+            motif: l['motif'] as String,
             montant: l['montant'] as int,
             date: DateTime.parse(l['date'] as String),
+            venteId: l['vente_id'] as int?,
+            remboursements: parDette[l['id'] as int] ?? const [],
           ),
         )
         .toList();
   }
 
-  // L'historique d'un seul client.
-  static Future<List<OperationClient>> lireOperations(int clientId) async {
+  static Future<void> ajouterDette(Dette dette) async {
     final db = await _ouvrir();
-    final lignes = await db.query(
-      'operations_client',
-      where: 'client_id = ?',
-      whereArgs: [clientId],
-      orderBy: 'date DESC',
-    );
-    return _versOperations(lignes);
+    await db.insert('dettes', {
+      'client_id': dette.clientId,
+      'motif': dette.motif,
+      'montant': dette.montant,
+      'date': dette.date.toIso8601String(),
+      'vente_id': dette.venteId,
+    });
   }
 
-  // Toutes les opérations (pour les chiffres de l'accueil).
-  static Future<List<OperationClient>> lireToutesOperations() async {
+  static Future<void> modifierDette({
+    required int id,
+    required String motif,
+    required int montant,
+    required DateTime date,
+  }) async {
     final db = await _ouvrir();
-    return _versOperations(await db.query('operations_client'));
+    await db.update(
+      'dettes',
+      {'motif': motif, 'montant': montant, 'date': date.toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // Supprime une dette et tous ses remboursements.
+  static Future<void> supprimerDette(int id) async {
+    final db = await _ouvrir();
+    await db.transaction((txn) async {
+      await txn.delete('remboursements', where: 'dette_id = ?', whereArgs: [id]);
+      await txn.delete('dettes', where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
+  static Future<void> ajouterRemboursement(Remboursement remboursement) async {
+    final db = await _ouvrir();
+    await db.insert('remboursements', {
+      'dette_id': remboursement.detteId,
+      'montant': remboursement.montant,
+      'date': remboursement.date.toIso8601String(),
+    });
   }
 
   // ---------- Dépenses ----------
