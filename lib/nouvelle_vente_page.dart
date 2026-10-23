@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'article.dart';
 import 'base_de_donnees.dart';
@@ -16,39 +17,81 @@ class NouvelleVentePage extends StatefulWidget {
 }
 
 class _NouvelleVentePageState extends State<NouvelleVentePage> {
-  // Le montant de la vente : c'est tout ce qu'il faut pour enregistrer une vente.
+  // Mode "Montant" : un seul champ.
   final TextEditingController _montantController = TextEditingController();
 
-  // Les champs du détail des articles (facultatif).
+  // Mode "Articles" : les champs pour un article.
   final TextEditingController _articleController = TextEditingController();
   final TextEditingController _quantiteController = TextEditingController(text: '1');
   final TextEditingController _prixController = TextEditingController();
-  final TextEditingController _payeController = TextEditingController(text: '0');
   final FocusNode _articleFocus = FocusNode();
 
-  final List<LigneVente> _lignes = []; // vide si le commerçant ne détaille pas
+  // Vente à crédit.
+  final TextEditingController _payeController = TextEditingController(text: '0');
+
+  bool _parArticles = false; // false = "Montant", true = "Articles"
+  bool _modeCharge = false; // vrai quand on a retrouvé le dernier mode utilisé
+
+  final List<LigneVente> _lignes = []; // les articles déjà ajoutés à la vente
   List<Article> _articles = []; // le catalogue ("Mes articles")
   List<Client> _clients = [];
   bool _credit = false;
   Client? _clientChoisi;
 
-  // Le total : la somme des articles s'il y en a, sinon le montant tapé.
-  int get _total {
-    if (_lignes.isNotEmpty) {
-      int somme = 0;
-      for (final ligne in _lignes) {
-        somme += ligne.montant;
-      }
-      return somme;
+  // L'article en cours de saisie (pas encore ajouté), s'il est complet.
+  // Il compte déjà dans le total : pas besoin d'appuyer sur "Ajouter" avant d'enregistrer.
+  LigneVente? get _ligneEnCours {
+    final article = _articleController.text.trim();
+    final quantite = int.tryParse(_quantiteController.text.trim());
+    final prix = int.tryParse(_prixController.text.trim());
+    if (article.isEmpty || quantite == null || quantite <= 0 || prix == null || prix <= 0) {
+      return null;
     }
-    return int.tryParse(_montantController.text.trim()) ?? 0;
+    return LigneVente(article: article, quantite: quantite, prixUnitaire: prix);
+  }
+
+  // Le total : en mode "Montant", le montant tapé ; en mode "Articles",
+  // la somme des articles ajoutés plus l'article en cours de saisie.
+  int get _total {
+    if (!_parArticles) {
+      return int.tryParse(_montantController.text.trim()) ?? 0;
+    }
+    int somme = 0;
+    for (final ligne in _lignes) {
+      somme += ligne.montant;
+    }
+    final enCours = _ligneEnCours;
+    if (enCours != null) {
+      somme += enCours.montant;
+    }
+    return somme;
   }
 
   @override
   void initState() {
     super.initState();
+    _chargerMode();
     _chargerArticles();
     _chargerClients();
+  }
+
+  // On retrouve le dernier mode utilisé : celui qui détaille toujours ses articles
+  // n'aura pas à changer de mode à chaque vente.
+  Future<void> _chargerMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _parArticles = prefs.getBool('vente_par_articles') ?? false;
+      _modeCharge = true;
+    });
+  }
+
+  Future<void> _changerMode(bool parArticles) async {
+    setState(() {
+      _parArticles = parArticles;
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('vente_par_articles', parArticles);
   }
 
   Future<void> _chargerArticles() async {
@@ -69,16 +112,6 @@ class _NouvelleVentePageState extends State<NouvelleVentePage> {
 
   void _message(String texte) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texte)));
-  }
-
-  // Quand des articles sont détaillés, le champ du montant affiche leur total.
-  // Quand il n'y en a plus, on le vide pour que le commerçant retape son montant.
-  void _actualiserMontant() {
-    if (_lignes.isEmpty) {
-      _montantController.clear();
-    } else {
-      _montantController.text = _total.toString();
-    }
   }
 
   // Ajoute une ligne. Si le même article au même prix est déjà là,
@@ -107,36 +140,41 @@ class _NouvelleVentePageState extends State<NouvelleVentePage> {
       _ajouterOuFusionner(
         LigneVente(article: article.nom, quantite: 1, prixUnitaire: article.prix),
       );
-      _actualiserMontant();
     });
   }
 
-  void _ajouterLigne() {
-    final article = _articleController.text.trim();
-    final quantite = int.tryParse(_quantiteController.text.trim());
-    final prix = int.tryParse(_prixController.text.trim());
+  // Quand le nom tapé correspond à un article du catalogue, on remplit son prix.
+  void _nomModifie(String texte) {
+    final nom = texte.trim().toLowerCase();
+    if (_prixController.text.isEmpty) {
+      for (final article in _articles) {
+        if (article.nom.toLowerCase() == nom) {
+          _prixController.text = article.prix.toString();
+          break;
+        }
+      }
+    }
+    setState(() {});
+  }
 
-    if (article.isEmpty) {
-      _message('Écris le nom de l’article vendu');
-      return;
-    }
-    if (quantite == null || quantite <= 0) {
-      _message('La quantité doit être au moins 1');
-      return;
-    }
-    if (prix == null || prix <= 0) {
-      _message('Entre le prix d’une unité, par exemple 500');
+  // Le bouton "Ajouter cet article" : valide l'article en cours et prépare le suivant.
+  void _ajouterLigne() {
+    final enCours = _ligneEnCours;
+    if (enCours == null) {
+      if (_articleController.text.trim().isEmpty) {
+        _message('Écris le nom de l’article vendu');
+      } else if ((int.tryParse(_quantiteController.text.trim()) ?? 0) <= 0) {
+        _message('La quantité doit être au moins 1');
+      } else {
+        _message('Entre le prix d’une unité, par exemple 500');
+      }
       return;
     }
 
     setState(() {
-      _ajouterOuFusionner(
-        LigneVente(article: article, quantite: quantite, prixUnitaire: prix),
-      );
-      _actualiserMontant();
+      _ajouterOuFusionner(enCours);
     });
 
-    // On prépare les champs pour l'article suivant.
     _articleController.clear();
     _quantiteController.text = '1';
     _prixController.clear();
@@ -186,9 +224,24 @@ class _NouvelleVentePageState extends State<NouvelleVentePage> {
   }
 
   Future<void> _enregistrer() async {
+    // En mode "Articles" : un article commencé mais incomplet ne doit pas être oublié en silence.
+    if (_parArticles) {
+      final saisieIncomplete =
+          _articleController.text.trim().isNotEmpty && _ligneEnCours == null;
+      if (saisieIncomplete) {
+        _message('Il manque le prix ou la quantité de l’article en cours');
+        return;
+      }
+      // L'article en cours, s'il est complet, est ajouté automatiquement.
+      final enCours = _ligneEnCours;
+      if (enCours != null) {
+        _ajouterOuFusionner(enCours);
+      }
+    }
+
     final total = _total;
     if (total <= 0) {
-      _message('Entre le montant de la vente');
+      _message(_parArticles ? 'Ajoute au moins un article avec son prix' : 'Entre le montant de la vente');
       return;
     }
 
@@ -212,7 +265,7 @@ class _NouvelleVentePageState extends State<NouvelleVentePage> {
 
     final vente = Vente(
       date: DateTime.now(),
-      lignes: List.of(_lignes), // peut être vide : le détail est facultatif
+      lignes: _parArticles ? List.of(_lignes) : <LigneVente>[],
       montant: total,
       clientId: clientId,
       credit: credit,
@@ -235,6 +288,130 @@ class _NouvelleVentePageState extends State<NouvelleVentePage> {
     super.dispose();
   }
 
+  // ----- Le mode "Montant" : un seul champ -----
+  Widget _blocMontant() {
+    return TextField(
+      controller: _montantController,
+      autofocus: true, // le clavier s'ouvre tout de suite
+      keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      onChanged: (_) => setState(() {}),
+      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+      decoration: const InputDecoration(
+        labelText: 'Montant de la vente (FCFA)',
+        border: OutlineInputBorder(),
+      ),
+    );
+  }
+
+  // ----- Le mode "Articles" : choisir ou taper les articles, le total se calcule seul -----
+  Widget _blocArticles() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_articles.isNotEmpty) ...[
+          const Text('Mes articles', style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          const Text(
+            'Touche un article pour l’ajouter, touche-le encore pour augmenter la quantité.',
+            style: TextStyle(fontSize: 12, color: Color(0xFF5B6B63)),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final a in _articles)
+                ActionChip(
+                  label: Text('${a.nom} · ${formaterMontant(a.prix)}'),
+                  onPressed: () => _ajouterRapide(a),
+                ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          const Text('Autre article', style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+        ],
+        TextField(
+          controller: _articleController,
+          focusNode: _articleFocus,
+          textCapitalization: TextCapitalization.sentences,
+          onChanged: _nomModifie,
+          decoration: const InputDecoration(
+            labelText: 'Article vendu',
+            hintText: 'Ex : sac de riz, sachet d’eau',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: TextField(
+                controller: _quantiteController,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  labelText: 'Quantité',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 3,
+              child: TextField(
+                controller: _prixController,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                onChanged: (_) => setState(() {}),
+                onSubmitted: (_) => _ajouterLigne(),
+                decoration: const InputDecoration(
+                  labelText: 'Prix unitaire (FCFA)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: _ajouterLigne,
+          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          icon: const Icon(Icons.add_shopping_cart),
+          label: const Text('Ajouter un autre article'),
+        ),
+        const SizedBox(height: 8),
+        for (int i = 0; i < _lignes.length; i++)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text('${_lignes[i].quantite} × ${_lignes[i].article}'),
+            subtitle: Text('${formaterMontant(_lignes[i].prixUnitaire)} FCFA l’unité'),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${formaterMontant(_lignes[i].montant)} FCFA',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                IconButton(
+                  tooltip: 'Retirer',
+                  icon: const Icon(Icons.close),
+                  onPressed: () {
+                    setState(() {
+                      _lignes.removeAt(i);
+                    });
+                  },
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final paye = int.tryParse(_payeController.text.trim()) ?? 0;
@@ -242,186 +419,72 @@ class _NouvelleVentePageState extends State<NouvelleVentePage> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Nouvelle vente')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // ----- L'essentiel : le montant. Le clavier s'ouvre tout de suite. -----
-          TextField(
-            controller: _montantController,
-            autofocus: true,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            readOnly: _lignes.isNotEmpty, // calculé quand des articles sont détaillés
-            onChanged: (_) => setState(() {}),
-            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            decoration: InputDecoration(
-              labelText: 'Montant de la vente (FCFA)',
-              helperText: _lignes.isNotEmpty ? 'Calculé d’après les articles' : null,
-              border: const OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 8),
-
-          // ----- Le détail des articles : facultatif, replié par défaut -----
-          ExpansionTile(
-            tilePadding: EdgeInsets.zero,
-            shape: const Border(),
-            collapsedShape: const Border(),
-            title: const Text(
-              'Détailler les articles (facultatif)',
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-            subtitle: _lignes.isEmpty
-                ? null
-                : Text(_lignes.length == 1 ? '1 article' : '${_lignes.length} articles'),
-            children: [
-              if (_articles.isNotEmpty) ...[
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Mes articles', style: TextStyle(fontWeight: FontWeight.w600)),
-                ),
-                const SizedBox(height: 4),
-                const Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Touche un article pour l’ajouter, touche-le encore pour augmenter la quantité.',
-                    style: TextStyle(fontSize: 12, color: Color(0xFF5B6B63)),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final a in _articles)
-                        ActionChip(
-                          label: Text('${a.nom} · ${formaterMontant(a.prix)}'),
-                          onPressed: () => _ajouterRapide(a),
-                        ),
-                    ],
-                  ),
+      body: !_modeCharge
+          ? const SizedBox.shrink()
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                // Un choix clair : je note juste le montant, ou je détaille les articles.
+                SegmentedButton<bool>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(
+                      value: false,
+                      icon: Icon(Icons.payments_outlined),
+                      label: Text('Montant'),
+                    ),
+                    ButtonSegment(
+                      value: true,
+                      icon: Icon(Icons.shopping_basket_outlined),
+                      label: Text('Articles'),
+                    ),
+                  ],
+                  selected: {_parArticles},
+                  onSelectionChanged: (choix) => _changerMode(choix.first),
                 ),
                 const SizedBox(height: 16),
-              ],
-              TextField(
-                controller: _articleController,
-                focusNode: _articleFocus,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: 'Article vendu',
-                  hintText: 'Ex : sac de riz, sachet d’eau',
-                  border: OutlineInputBorder(),
+                if (_parArticles) _blocArticles() else _blocMontant(),
+
+                // ----- La vente à crédit -----
+                const Divider(height: 32),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Vente à crédit'),
+                  subtitle: const Text('Le client paie plus tard (tout ou une partie)'),
+                  value: _credit,
+                  onChanged: (valeur) {
+                    setState(() {
+                      _credit = valeur;
+                    });
+                  },
                 ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    flex: 2,
-                    child: TextField(
-                      controller: _quantiteController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: const InputDecoration(
-                        labelText: 'Quantité',
-                        border: OutlineInputBorder(),
-                      ),
+                if (_credit) ...[
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: _choisirClient,
+                    style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                    icon: const Icon(Icons.person_outline),
+                    label: Text(_clientChoisi?.nom ?? 'Choisir un client'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _payeController,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Montant payé tout de suite (FCFA)',
+                      border: OutlineInputBorder(),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    flex: 3,
-                    child: TextField(
-                      controller: _prixController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: const InputDecoration(
-                        labelText: 'Prix unitaire (FCFA)',
-                        border: OutlineInputBorder(),
-                      ),
-                      onSubmitted: (_) => _ajouterLigne(),
-                    ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Reste à payer : ${formaterMontant(reste)} FCFA',
+                    style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFB3261E)),
                   ),
                 ],
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: _ajouterLigne,
-                style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-                icon: const Icon(Icons.add_shopping_cart),
-                label: const Text('Ajouter cet article'),
-              ),
-              const SizedBox(height: 8),
-              for (int i = 0; i < _lignes.length; i++)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text('${_lignes[i].quantite} × ${_lignes[i].article}'),
-                  subtitle: Text('${formaterMontant(_lignes[i].prixUnitaire)} FCFA l’unité'),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${formaterMontant(_lignes[i].montant)} FCFA',
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      IconButton(
-                        tooltip: 'Retirer',
-                        icon: const Icon(Icons.close),
-                        onPressed: () {
-                          setState(() {
-                            _lignes.removeAt(i);
-                            _actualiserMontant();
-                          });
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-
-          // ----- La vente à crédit -----
-          const Divider(height: 24),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Vente à crédit'),
-            subtitle: const Text('Le client paie plus tard (tout ou une partie)'),
-            value: _credit,
-            onChanged: (valeur) {
-              setState(() {
-                _credit = valeur;
-              });
-            },
-          ),
-          if (_credit) ...[
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _choisirClient,
-              style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-              icon: const Icon(Icons.person_outline),
-              label: Text(_clientChoisi?.nom ?? 'Choisir un client'),
+              ],
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _payeController,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                labelText: 'Montant payé tout de suite (FCFA)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Reste à payer : ${formaterMontant(reste)} FCFA',
-              style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFB3261E)),
-            ),
-          ],
-        ],
-      ),
 
       // ----- Barre du bas : le total et le bouton pour enregistrer -----
       bottomNavigationBar: SafeArea(
