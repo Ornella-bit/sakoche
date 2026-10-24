@@ -3,11 +3,14 @@
 **Le carnet de caisse du petit commerçant, dans le téléphone.**
 Application Android qui fonctionne **sans internet**, pour noter ses ventes, ses dépenses et les dettes de ses clients.
 
-<!-- Remplace les chemins ci-dessous par tes vraies captures d'écran -->
-![Accueil](docs/captures/accueil.png)
-![Nouvelle vente](docs/captures/vente.png)
-![Compte d'un client](docs/captures/clients.png)
-![Rapports](docs/captures/rapports.png)
+<!-- markdownlint-disable MD033 -->
+<p align="center">
+  <img src="docs/captures/accueil.png" style="width: 200px; margin: 0 5px;" alt="Accueil" />
+  <img src="docs/captures/vente.png" style="width: 200px; margin: 0 5px;" alt="Nouvelle vente" />
+  <img src="docs/captures/clients.png" style="width: 200px; margin: 0 5px;" alt="Compte d'un client" />
+  <img src="docs/captures/rapports.png" style="width: 200px; margin: 0 5px;" alt="Rapports" />
+</p>
+<!-- markdownlint-enable MD033 -->
 
 ## Le problème
 
