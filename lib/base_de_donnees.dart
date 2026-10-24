@@ -1,13 +1,25 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
-import 'article.dart';
 import 'client.dart';
 import 'depense.dart';
 import 'vente.dart';
 
 class BaseDeDonnees {
   static Database? _base;
+
+  // Où se trouve le fichier du carnet sur le téléphone.
+  static Future<String> cheminFichier() async {
+    final dossier = await getDatabasesPath();
+    return join(dossier, 'sakoche.db');
+  }
+
+  // Ferme le carnet (utile avant de copier ou de remplacer le fichier).
+  // Il se rouvre tout seul au prochain besoin.
+  static Future<void> fermer() async {
+    await _base?.close();
+    _base = null;
+  }
 
   static Future<Database> _ouvrir() async {
     if (_base != null) {
@@ -19,11 +31,10 @@ class BaseDeDonnees {
 
     _base = await openDatabase(
       chemin,
-      version: 6, // version 6 : chaque dette a son motif, sa date et ses remboursements
+      version: 7, // version 7 : une vente peut avoir une note libre
       onCreate: (db, version) async {
         await _creerTableVentes(db);
         await _creerTableLignes(db);
-        await _creerTableArticles(db);
         await _creerTableDepenses(db);
         await _creerTableClients(db);
         await _creerTablesDettes(db);
@@ -31,16 +42,6 @@ class BaseDeDonnees {
       onUpgrade: (db, ancienneVersion, nouvelleVersion) async {
         if (ancienneVersion < 2) {
           await _creerTableLignes(db);
-        }
-        if (ancienneVersion < 3) {
-          await _creerTableArticles(db);
-          // On remplit le catalogue avec les articles déjà vendus,
-          // avec le dernier prix utilisé pour chacun.
-          await db.execute('''
-            INSERT OR REPLACE INTO articles (nom, prix)
-            SELECT article, prix_unitaire FROM lignes_vente
-            WHERE id IN (SELECT MAX(id) FROM lignes_vente GROUP BY article)
-          ''');
         }
         if (ancienneVersion < 4) {
           await _creerTableDepenses(db);
@@ -56,6 +57,10 @@ class BaseDeDonnees {
             await _migrerAnciennesDettes(db);
           }
         }
+        if (ancienneVersion < 7) {
+          // Les ventes déjà enregistrées reçoivent une note vide.
+          await db.execute("ALTER TABLE ventes ADD COLUMN note TEXT NOT NULL DEFAULT ''");
+        }
       },
     );
     return _base!;
@@ -66,6 +71,7 @@ class BaseDeDonnees {
       CREATE TABLE ventes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         montant INTEGER NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
         date TEXT NOT NULL
       )
     ''');
@@ -168,28 +174,20 @@ class BaseDeDonnees {
     ''');
   }
 
-  // UNIQUE + NOCASE : "Riz" et "riz" sont le même article (un seul exemplaire).
-  static Future<void> _creerTableArticles(Database db) async {
-    await db.execute('''
-      CREATE TABLE articles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nom TEXT NOT NULL UNIQUE COLLATE NOCASE,
-        prix INTEGER NOT NULL
-      )
-    ''');
-  }
-
   // ---------- Ventes ----------
 
-  // Enregistre la vente et, s'il y en a, le détail de ses articles.
-  // Le détail est facultatif : une vente peut n'avoir qu'un montant.
+  // Enregistre une vente : un montant, une note libre facultative ("pour quoi ?")
+  // et, si elle est à crédit, la dette du client.
   static Future<void> ajouterVente(Vente vente) async {
     final db = await _ouvrir();
     await db.transaction((txn) async {
       final idVente = await txn.insert('ventes', {
         'montant': vente.montant,
+        'note': vente.note,
         'date': vente.date.toIso8601String(),
       });
+      // Le détail par article n'existe plus pour les nouvelles ventes,
+      // mais on garde la possibilité d'enregistrer des lignes (anciennes données).
       for (final ligne in vente.lignes) {
         await txn.insert('lignes_vente', {
           'vente_id': idVente,
@@ -199,11 +197,13 @@ class BaseDeDonnees {
         });
       }
       // Vente à crédit : ce qui n'est pas payé devient une dette du client.
-      // Le motif reprend la liste des articles vendus.
+      // Le motif de la dette reprend la note de la vente.
       if (vente.clientId != null && vente.credit > 0) {
         await txn.insert('dettes', {
           'client_id': vente.clientId,
-          'motif': vente.lignes.isEmpty ? '' : vente.resume,
+          'motif': vente.note.isNotEmpty
+              ? vente.note
+              : (vente.lignes.isEmpty ? '' : vente.resume),
           'montant': vente.credit,
           'date': vente.date.toIso8601String(),
           'vente_id': idVente,
@@ -215,8 +215,15 @@ class BaseDeDonnees {
   static Future<List<Vente>> lireVentes() async {
     final db = await _ouvrir();
     final lignesVentes = await db.query('ventes', orderBy: 'date DESC');
-    final resultat = <Vente>[];
 
+    // Les dettes liées à une vente à crédit : on les range par numéro de vente.
+    final dettesLiees = await db.query('dettes', where: 'vente_id IS NOT NULL');
+    final detteParVente = <int, Map<String, Object?>>{};
+    for (final dette in dettesLiees) {
+      detteParVente[dette['vente_id'] as int] = dette;
+    }
+
+    final resultat = <Vente>[];
     for (final v in lignesVentes) {
       final id = v['id'] as int;
       final lignes = await db.query(
@@ -224,11 +231,15 @@ class BaseDeDonnees {
         where: 'vente_id = ?',
         whereArgs: [id],
       );
+      final dette = detteParVente[id];
       resultat.add(
         Vente(
           id: id,
           date: DateTime.parse(v['date'] as String),
           montant: v['montant'] as int,
+          note: v['note'] as String,
+          clientId: dette == null ? null : dette['client_id'] as int,
+          credit: dette == null ? 0 : dette['montant'] as int,
           lignes: lignes
               .map(
                 (l) => LigneVente(
@@ -244,7 +255,59 @@ class BaseDeDonnees {
     return resultat;
   }
 
-  // Supprime les ventes, les dépenses et les dettes. Le catalogue et la liste des clients restent.
+  // Corrige une vente. Si le montant change, l'ancien détail par article
+  // n'a plus de sens : on l'efface.
+  static Future<void> modifierVente({
+    required int id,
+    required int montant,
+    required String note,
+    required DateTime date,
+    required bool effacerLignes,
+  }) async {
+    final db = await _ouvrir();
+    await db.transaction((txn) async {
+      await txn.update(
+        'ventes',
+        {'montant': montant, 'note': note, 'date': date.toIso8601String()},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      if (effacerLignes) {
+        await txn.delete('lignes_vente', where: 'vente_id = ?', whereArgs: [id]);
+      }
+    });
+  }
+
+  // Supprime une vente. Si elle était à crédit, la dette liée est supprimée aussi.
+  static Future<void> supprimerVente(int id) async {
+    final db = await _ouvrir();
+    await db.transaction((txn) async {
+      await txn.rawDelete(
+        'DELETE FROM remboursements WHERE dette_id IN (SELECT id FROM dettes WHERE vente_id = ?)',
+        [id],
+      );
+      await txn.delete('dettes', where: 'vente_id = ?', whereArgs: [id]);
+      await txn.delete('lignes_vente', where: 'vente_id = ?', whereArgs: [id]);
+      await txn.delete('ventes', where: 'id = ?', whereArgs: [id]);
+    });
+  }
+
+  // Les dernières notes utilisées (sans doublons) : elles sont proposées
+  // comme raccourcis quand on enregistre une vente.
+  static Future<List<String>> lireNotesRecentes() async {
+    final db = await _ouvrir();
+    final lignes = await db.rawQuery('''
+      SELECT note, MAX(date) AS derniere
+      FROM ventes
+      WHERE note != ''
+      GROUP BY note COLLATE NOCASE
+      ORDER BY derniere DESC
+      LIMIT 8
+    ''');
+    return lignes.map((l) => l['note'] as String).toList();
+  }
+
+  // Supprime toutes les ventes, les dépenses et les dettes. La liste des clients reste.
   static Future<void> toutEffacer() async {
     final db = await _ouvrir();
     await db.transaction((txn) async {
@@ -425,43 +488,5 @@ class BaseDeDonnees {
   static Future<void> supprimerDepense(int id) async {
     final db = await _ouvrir();
     await db.delete('depenses', where: 'id = ?', whereArgs: [id]);
-  }
-
-  // ---------- Catalogue d'articles ----------
-
-  static Future<List<Article>> lireArticles() async {
-    final db = await _ouvrir();
-    final lignes = await db.query('articles', orderBy: 'nom COLLATE NOCASE');
-    return lignes
-        .map(
-          (l) => Article(
-            id: l['id'] as int,
-            nom: l['nom'] as String,
-            prix: l['prix'] as int,
-          ),
-        )
-        .toList();
-  }
-
-  // Ajoute un article, ou le modifie s'il a déjà un id.
-  static Future<void> enregistrerArticle(Article article) async {
-    final db = await _ouvrir();
-    final valeurs = {'nom': article.nom, 'prix': article.prix};
-    if (article.id == null) {
-      await db.insert('articles', valeurs, conflictAlgorithm: ConflictAlgorithm.replace);
-    } else {
-      await db.update(
-        'articles',
-        valeurs,
-        where: 'id = ?',
-        whereArgs: [article.id],
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-    }
-  }
-
-  static Future<void> supprimerArticle(int id) async {
-    final db = await _ouvrir();
-    await db.delete('articles', where: 'id = ?', whereArgs: [id]);
   }
 }

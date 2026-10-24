@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'accueil_page.dart';
 import 'base_de_donnees.dart';
@@ -11,6 +12,7 @@ import 'moi_page.dart';
 import 'nouvelle_vente_page.dart';
 import 'outils.dart';
 import 'profil.dart';
+import 'rapports_page.dart';
 import 'vente.dart';
 import 'ventes_page.dart';
 
@@ -27,8 +29,13 @@ class SakocheApp extends StatelessWidget {
       title: 'Sakoche',
       debugShowCheckedModeBanner: false,
       // L'application est en français : calendrier, boutons système, etc.
-      
-      
+      locale: const Locale('fr'),
+      supportedLocales: const [Locale('fr')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: kPrincipal),
         scaffoldBackgroundColor: kFond,
@@ -131,6 +138,20 @@ class _CoqueState extends State<Coque> {
     }
   }
 
+  // Ouvre la page des rapports avec les données du moment.
+  void _ouvrirRapports() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RapportsPage(
+          ventes: _ventes,
+          depenses: _depenses,
+          dettes: _dettes,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = <Widget>[
@@ -142,7 +163,11 @@ class _CoqueState extends State<Coque> {
         onNouvelleVente: _nouvelleVente,
         onOuvrirMoi: () => _aller(4),
       ),
-      VentesPage(ventes: _ventes, onNouvelleVente: _nouvelleVente),
+      VentesPage(
+        ventes: _ventes,
+        onNouvelleVente: _nouvelleVente,
+        onChange: _rechargerTout,
+      ),
       DepensesPage(depenses: _depenses, onChange: _chargerDepenses),
       ClientsPage(clients: _clients, onChange: _chargerClients),
       MoiPage(
@@ -167,6 +192,7 @@ class _CoqueState extends State<Coque> {
         ongletActuel: _onglet,
         onAller: _aller,
         onDonneesEffacees: _rechargerTout,
+        onRapports: _ouvrirRapports,
       ),
       body: IndexedStack(index: _onglet, children: pages),
       // On empêche la taille du texte du téléphone d'agrandir la barre du bas.

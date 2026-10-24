@@ -10,7 +10,7 @@ class VentesPage extends StatelessWidget {
   const VentesPage({
     super.key,
     required this.ventes,
-    required this.onNouvelleVente,
+    required this.onNouvelleVente, required Future<void> Function() onChange,
   });
 
   @override

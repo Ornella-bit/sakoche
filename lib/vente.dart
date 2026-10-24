@@ -19,6 +19,7 @@ class Vente {
   final DateTime date;
   final List<LigneVente> lignes;
   final int montant; // le total de la vente
+  final String note; // texte libre facultatif : "pour quoi ?" (ex : pommes)
   final int? clientId; // le client, si la vente est (en partie) à crédit
   final int credit; // la part qui reste à payer (0 si tout est payé)
 
@@ -27,15 +28,21 @@ class Vente {
     required this.date,
     required this.lignes,
     required this.montant,
+    this.note = '',
     this.clientId,
     this.credit = 0,
   });
 
   // Résumé en une ligne, ex : "2 × riz, 1 × huile".
+  // Ce qu'on affiche pour décrire la vente : le détail des articles (anciennes ventes),
+  // sinon la note libre, sinon simplement "Vente".
   String get resume {
-    if (lignes.isEmpty) {
-      return 'Vente'; // vente rapide, sans détail d'articles
+    if (lignes.isNotEmpty) {
+      return lignes.map((l) => '${l.quantite} × ${l.article}').join(', ');
     }
-    return lignes.map((l) => '${l.quantite} × ${l.article}').join(', ');
+    if (note.isNotEmpty) {
+      return note;
+    }
+    return 'Vente';
   }
 }

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'articles_page.dart';
 import 'outils.dart';
 import 'parametres_page.dart';
 import 'profil.dart';
@@ -11,6 +10,7 @@ class MenuLateral extends StatelessWidget {
   final int ongletActuel;
   final void Function(int) onAller;
   final Future<void> Function() onDonneesEffacees;
+  final VoidCallback onRapports; // ouvre la page des rapports
 
   const MenuLateral({
     super.key,
@@ -18,6 +18,7 @@ class MenuLateral extends StatelessWidget {
     required this.ongletActuel,
     required this.onAller,
     required this.onDonneesEffacees,
+    required this.onRapports,
   });
 
   // Une ligne du menu.
@@ -47,18 +48,9 @@ class MenuLateral extends StatelessWidget {
     onAller(index);
   }
 
-  void _bientot(BuildContext context) {
-    final messager = ScaffoldMessenger.of(context);
-    Navigator.pop(context);
-    messager.showSnackBar(
-      const SnackBar(content: Text('Bientôt disponible')),
-    );
-  }
-
-  void _articles(BuildContext context) {
-    final navigateur = Navigator.of(context);
-    navigateur.pop(); // ferme le menu
-    navigateur.push(MaterialPageRoute(builder: (_) => const ArticlesPage()));
+  void _rapports(BuildContext context) {
+    Navigator.pop(context); // ferme le menu
+    onRapports();
   }
 
   void _parametres(BuildContext context) {
@@ -143,14 +135,9 @@ class MenuLateral extends StatelessWidget {
                   onTap: () => _aller(context, 0),
                 ),
                 _tuile(
-                  icone: Icons.inventory_2_outlined,
-                  texte: 'Mes articles',
-                  onTap: () => _articles(context),
-                ),
-                _tuile(
                   icone: Icons.bar_chart,
                   texte: 'Rapports',
-                  onTap: () => _bientot(context),
+                  onTap: () => _rapports(context),
                 ),
                 _tuile(
                   icone: Icons.groups_outlined,
@@ -169,7 +156,7 @@ class MenuLateral extends StatelessWidget {
                   onTap: () => showAboutDialog(
                     context: context,
                     applicationName: 'Sakoche',
-                    applicationVersion: '0.8.0',
+                    applicationVersion: '1.0.0',
                     applicationLegalese: 'Le carnet de caisse du petit commerçant.',
                   ),
                 ),
@@ -180,7 +167,7 @@ class MenuLateral extends StatelessWidget {
           const Padding(
             padding: EdgeInsets.all(20),
             child: Text(
-              'Sakoche · version 0.8.0',
+              'Sakoche · version 1.0.0',
               style: TextStyle(fontSize: 11, color: Color(0xFF5B6B63)),
             ),
           ),

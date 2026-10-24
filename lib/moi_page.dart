@@ -110,7 +110,7 @@ class _MoiPageState extends State<MoiPage> {
             onTap: () => showAboutDialog(
               context: context,
               applicationName: 'Sakoche',
-              applicationVersion: '0.8.0',
+              applicationVersion: '1.0.0',
               applicationLegalese: 'Le carnet de caisse du petit commerçant.',
             ),
           ),
